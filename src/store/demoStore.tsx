@@ -30,18 +30,36 @@ import {
   apiAnalyzeAgent,
   apiGetDashboard,
   apiPatchTask,
-  apiPostEvent,
   apiPostSnapshot,
+  apiResetDemo,
+  submitNormalizedEvent,
   type BackendAgentOutput,
+  type BackendAgentRun,
   type BackendDashboardResponse,
   type BackendEvent,
+  type BackendEventInput,
   type BackendRiskResult,
   type BackendSnapshot,
   type BackendTask,
 } from "../lib/apiClient";
+import {
+  completeCareTaskOnBackend,
+  isBackendAuthoritativeTaskAction,
+} from "../lib/careTaskWorkflow";
 import { deriveCareLoopStatus, deriveDisplayStatus } from "../lib/displayStatus";
+import {
+  resolveDashboardAgentState,
+  type AgentRunViewState,
+} from "../lib/agentOutputState";
+import {
+  apiDataQualityToRatio,
+  migratePersistedDataQuality,
+} from "../lib/dataQuality";
 import { calculateRisk } from "../lib/riskEngine";
-import { latestWearableSnapshot } from "../lib/wearableImport";
+import {
+  latestWearableSnapshot,
+  mapRecentSnapshotsToTrend,
+} from "../lib/wearableImport";
 import {
   getActiveTaskForElder as selectActiveTaskForElder,
   getLatestTaskForElder,
@@ -51,6 +69,7 @@ import type {
   AgentOutput,
   AgentMode,
   AgentRoleSummaries,
+  AgentSummarySource,
   AgentTraceBundle,
   CareEvent,
   CareMemoryItem,
@@ -103,6 +122,7 @@ export interface DemoState {
   operationalStates: Record<string, OperationalState>;
   backendRiskResults: Record<string, RiskResult>;
   agentOutputs: Record<string, AgentOutput>;
+  agentRunStates: Record<string, AgentRunViewState>;
   backend: BackendStatus;
   initialCareMemoryByElderId: Record<string, InitialCareMemory>;
   memoryDraftsByElderId: Record<string, InitialCareMemory>;
@@ -120,6 +140,12 @@ export type DemoAction =
   | { type: "RESET_DEMO" }
   | { type: "HYDRATE_FROM_BACKEND"; payload: Partial<DemoState>; syncedAt: string }
   | { type: "SET_BACKEND_STATUS"; payload: BackendStatus }
+  | {
+      type: "SET_AGENT_FAILURE";
+      elderId: string;
+      requestedProvider: AgentMode;
+      warning: string;
+    }
   | { type: "TRIGGER_CHEN_DIZZINESS" }
   | { type: "CAREGIVER_ACCEPT_TASK" }
   | { type: "CAREGIVER_MARK_VIEWED" }
@@ -212,8 +238,6 @@ const toDeviceRecord = (items: DeviceRecord[]) =>
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 const riskLevelFromBackend = (level: BackendRiskResult["status_level"]): RiskLevel => {
-  if (level === "insufficient_data") return "data_insufficient";
-  if (level === "observe") return "observation";
   return level;
 };
 
@@ -224,33 +248,54 @@ const statusFromRisk = (level: RiskLevel): OperationalState => {
   return "normal";
 };
 
-const backendEventTypeToLocal = (eventType: string): CareEvent["eventType"] => {
-  if (eventType === "sos_long_press") return "sos";
-  if (
-    [
-      "medication_reminder",
-      "medication_confirmed",
-      "voice_symptom",
-      "fall_detected",
-      "location_alert",
-      "night_wakeup",
-      "low_activity",
-      "caregiver_accepted",
-      "caregiver_checked",
-      "caregiver_completed",
-      "system_risk_update",
-    ].includes(eventType)
-  ) {
-    return eventType as CareEvent["eventType"];
+const backendEventTypeToLocal = (event: BackendEvent): CareEvent["eventType"] => {
+  const action = String(event.payload?.action ?? "");
+  if (event.event_type === "sos") {
+    return action === "triple_press" ? "sos_triple_press" : "sos_long_press";
+  }
+  if (event.event_type === "voice") {
+    if (action === "wandering_help") return "wandering_help";
+    if (action === "medication_query") return "medication_query";
+    return "voice_symptom";
+  }
+  if (event.event_type === "medication") {
+    return action === "confirmed" ? "medication_confirmed" : "medication_reminder";
+  }
+  if (event.event_type === "fall") {
+    if (action === "no_response") return "no_response_after_fall";
+    if (action === "inactivity_after_fall") return "inactivity_after_fall";
+    return "fall_detected";
+  }
+  if (event.event_type === "location") {
+    return action === "geofence_exit" ? "geofence_exit" : "location_alert";
+  }
+  if (event.event_type === "device_status") {
+    const deviceActions: Record<string, CareEvent["eventType"]> = {
+      not_worn: "device_not_worn",
+      low_battery: "device_low_battery",
+      reconnected: "device_reconnected",
+      night_wakeup: "night_wakeup",
+      low_activity: "low_activity",
+    };
+    return deviceActions[action] ?? "system_risk_update";
+  }
+  if (event.event_type === "manual_note") {
+    const manualActions: Record<string, CareEvent["eventType"]> = {
+      caregiver_accepted: "caregiver_accepted",
+      caregiver_checked: "caregiver_checked",
+      caregiver_completed: "caregiver_completed",
+    };
+    return manualActions[action] ?? "system_risk_update";
   }
   return "system_risk_update";
 };
 
 const backendSourceToLocal = (source: string): CareEvent["source"] => {
-  if (["demo", "mock_wearable", "caregiver", "system"].includes(source)) {
-    return source as CareEvent["source"];
-  }
-  return source.includes("apple") ? "mock_wearable" : "system";
+  if (source === "esp32" || source === "nrf") return "hardware_simulator";
+  if (source === "mobile_app") return "voice_simulator";
+  if (source === "mock") return "demo";
+  if (source === "wearable_api" || source === "csv") return "wearable_import";
+  return "system";
 };
 
 const mapBackendPayload = (payload: Record<string, unknown> = {}): CareEvent["payload"] => ({
@@ -280,13 +325,16 @@ const eventTitle = (event: BackendEvent) => {
 const mapBackendEvent = (event: BackendEvent): CareEvent => ({
   eventId: event.event_id,
   elderId: event.elder_id,
-  eventType: backendEventTypeToLocal(event.event_type),
+  eventType: backendEventTypeToLocal(event),
   timestamp: event.timestamp,
   title: eventTitle(event),
   rawText: event.raw_text ?? undefined,
   source: backendSourceToLocal(event.source),
   payload: mapBackendPayload(event.payload),
-  status: event.event_type.includes("caregiver") ? "acknowledged" : "open",
+  status: event.status === "resolved" ? "resolved" : "open",
+  linkedTaskId: event.linked_task_id ?? undefined,
+  handledBy: event.resolved_by ?? undefined,
+  handledAt: event.resolved_at ?? undefined,
 });
 
 const deriveMedicationEvening = (events: CareEvent[]) => {
@@ -311,7 +359,7 @@ const mapBackendSnapshot = (
   date: snapshot.date,
   snapshotId: snapshot.snapshot_id,
   dataSource: snapshot.data_source,
-  dataQuality: snapshot.data_quality,
+  dataQuality: apiDataQualityToRatio(snapshot.data_quality),
   heartRate: snapshot.heart_rate_avg,
   restingHeartRate: snapshot.resting_heart_rate,
   stepsToday: snapshot.steps,
@@ -319,11 +367,11 @@ const mapBackendSnapshot = (
   sleepDuration: snapshot.sleep_duration,
   medicationMorning: "confirmed",
   medicationEvening: deriveMedicationEvening(events),
-  wearTimeHours: snapshot.wear_time_hours ?? 0,
+  wearTimeHours: snapshot.wear_time_hours,
   locationZone: "长者中心二楼",
   safeZoneStatus: "inside",
   fallDetected: events.some((event) => event.eventType === "fall_detected"),
-  dataCompleteness: snapshot.data_quality / 100,
+  dataCompleteness: apiDataQualityToRatio(snapshot.data_quality),
   lastSyncedAt: snapshot.created_at,
 });
 
@@ -340,7 +388,7 @@ const createMissingSnapshot = (elderId: string): DailySnapshot => ({
   sleepDuration: null,
   medicationMorning: "not_required",
   medicationEvening: "not_required",
-  wearTimeHours: 0,
+  wearTimeHours: null,
   locationZone: "測試資料",
   safeZoneStatus: "unknown",
   fallDetected: false,
@@ -348,7 +396,17 @@ const createMissingSnapshot = (elderId: string): DailySnapshot => ({
   lastSyncedAt: new Date().toISOString(),
 });
 
-const mapBackendTask = (task: BackendTask): CareTask => ({
+const backendTaskStatusToLocal = (status: BackendTask["status"]): CareTask["status"] => {
+  if (status === "cancelled") return "cancelled";
+  if (status === "resolved") return "completed";
+  if (status === "acknowledged" || status === "in_progress") return "in_progress";
+  return "pending";
+};
+
+export const mapBackendTask = (
+  task: BackendTask,
+  agentSummarySource?: AgentSummarySource,
+): CareTask => ({
   taskId: task.task_id,
   elderId: task.elder_id,
   sourceEventId: task.source_event_id ?? undefined,
@@ -357,7 +415,8 @@ const mapBackendTask = (task: BackendTask): CareTask => ({
   reason: task.task_reason,
   recommendedAction: task.recommended_action,
   assignedTo: task.handled_by ?? "护工A",
-  status: task.status,
+  status: backendTaskStatusToLocal(task.status),
+  agentSummarySource,
   createdAt: task.created_at,
   updatedAt: task.completed_at ?? task.created_at,
   completedAt: task.completed_at ?? undefined,
@@ -366,7 +425,10 @@ const mapBackendTask = (task: BackendTask): CareTask => ({
   handledNote: task.handled_note ?? undefined,
 });
 
-const mapBackendAgentOutput = (output: BackendAgentOutput): AgentOutput => ({
+const mapBackendAgentOutput = (
+  output: BackendAgentOutput,
+  run?: BackendAgentRun | null,
+): AgentOutput => ({
   outputId: output.output_id,
   elderId: output.elder_id,
   sourceEventId: output.source_event_id ?? undefined,
@@ -379,6 +441,11 @@ const mapBackendAgentOutput = (output: BackendAgentOutput): AgentOutput => ({
   safetyDisclaimer: output.safety_disclaimer,
   keyReasons: output.key_reasons,
   agentSource: output.agent_source,
+  requestedProvider: run?.provider,
+  model: run?.model,
+  durationMs: run?.duration_ms,
+  validationStatus: run?.validation_status,
+  fallbackUsed: run?.fallback_used,
   warning: output.warning,
   createdAt: output.created_at,
 });
@@ -393,8 +460,8 @@ const mapBackendRisk = (
   keyReasons: risk.key_reasons,
   triggeredRules: risk.triggered_rules,
   recommendedAction: risk.recommended_action,
-  dataCompleteness: risk.data_quality / 100,
-  confidence: risk.data_quality / 100,
+  dataCompleteness: apiDataQualityToRatio(risk.data_quality),
+  confidence: apiDataQualityToRatio(risk.data_quality),
   medicalDisclaimer: risk.safety_disclaimer,
 });
 
@@ -410,6 +477,7 @@ const mapDashboardToDemoState = (
   const operationalStates: Record<string, OperationalState> = {};
   const backendRiskResults: Record<string, RiskResult> = {};
   const agentOutputs: Record<string, AgentOutput> = {};
+  const agentRunStates: Record<string, AgentRunViewState> = {};
   const trends: Record<string, ElderTrend> = {};
 
   for (const row of dashboard.elders) {
@@ -424,6 +492,10 @@ const mapDashboardToDemoState = (
       riskTags: row.elder.risk_tags,
       caregiverId: fallback.profiles[elderId]?.caregiverId ?? "CG-A",
       familyContactId: fallback.profiles[elderId]?.familyContactId ?? `FAM-${elderId}`,
+      subjectKind:
+        row.elder.subject_kind ??
+        fallback.profiles[elderId]?.subjectKind ??
+        (elderId === testAppleWatchId ? "team_test" : "elder"),
     };
     baselines[elderId] = {
       elderId,
@@ -432,7 +504,7 @@ const mapDashboardToDemoState = (
       avgActiveMinutes7d: row.baseline.avg_active_minutes_7d,
       restingHrBaseline: row.baseline.resting_hr_baseline,
       medicationOnTimeRate: fallback.baselines[elderId]?.medicationOnTimeRate ?? 0.9,
-      baselineConfidence: row.baseline.baseline_confidence / 100,
+      baselineConfidence: apiDataQualityToRatio(row.baseline.baseline_confidence),
       baselineLabel: row.baseline.baseline_label,
       usableDays: row.baseline.usable_days,
     };
@@ -446,29 +518,37 @@ const mapDashboardToDemoState = (
       snapshots[elderId] = fallback.snapshots[elderId] ?? createMissingSnapshot(elderId);
     }
 
-    trends[elderId] =
-      fallback.trends[elderId] ??
-      {
-        elderId,
-        points: [
-          {
-            date: snapshots[elderId].date,
-            steps: snapshots[elderId].stepsToday ?? 0,
-            sleepHours: snapshots[elderId].sleepDuration ?? 0,
-            medicationOnTimeRate: baselines[elderId].medicationOnTimeRate,
-            riskLevel: row.risk_result
-              ? riskLevelFromBackend(row.risk_result.status_level)
-              : "data_insufficient",
-          },
-        ],
-      };
-    tasks.push(...row.tasks.map(mapBackendTask));
+    const recentSnapshots = row.recent_snapshots?.length
+      ? row.recent_snapshots
+      : row.latest_snapshot
+        ? [row.latest_snapshot]
+        : [];
+    trends[elderId] = recentSnapshots.length
+      ? mapRecentSnapshotsToTrend(
+          elderId,
+          recentSnapshots,
+          baselines[elderId].medicationOnTimeRate,
+          row.risk_result
+            ? riskLevelFromBackend(row.risk_result.status_level)
+            : "data_insufficient",
+        )
+      : fallback.trends[elderId] ?? { elderId, points: [] };
+    const currentAgent = resolveDashboardAgentState(
+      row.latest_agent_output,
+      row.latest_agent_run,
+    );
+    const taskAgentSource: AgentSummarySource | undefined = currentAgent.run?.fallbackUsed
+      ? "fallback_rule"
+      : currentAgent.output?.agent_source;
+    tasks.push(...row.tasks.map((task) => mapBackendTask(task, taskAgentSource)));
 
-    const activeTask = row.tasks.find((task) => task.status !== "completed");
+    const activeTask = row.tasks.find(
+      (task) => !["resolved", "cancelled"].includes(task.status),
+    );
     operationalStates[elderId] = activeTask
-      ? activeTask.status === "completed"
-        ? "follow_up"
-        : activeTask.status
+      ? activeTask.status === "open"
+        ? "pending"
+        : "in_progress"
       : "normal";
 
     if (row.risk_result && snapshots[elderId]) {
@@ -480,11 +560,18 @@ const mapDashboardToDemoState = (
       });
       backendRiskResults[elderId] = mapBackendRisk(row.risk_result, fallbackRisk);
       operationalStates[elderId] =
-        activeTask?.status ?? statusFromRisk(backendRiskResults[elderId].riskLevel);
+        activeTask
+          ? activeTask.status === "open"
+            ? "pending"
+            : "in_progress"
+          : statusFromRisk(backendRiskResults[elderId].riskLevel);
     }
 
-    if (row.latest_agent_output) {
-      agentOutputs[elderId] = mapBackendAgentOutput(row.latest_agent_output);
+    if (currentAgent.run) {
+      agentRunStates[elderId] = currentAgent.run;
+    }
+    if (currentAgent.output) {
+      agentOutputs[elderId] = mapBackendAgentOutput(currentAgent.output, row.latest_agent_run);
     }
   }
 
@@ -498,6 +585,7 @@ const mapDashboardToDemoState = (
     operationalStates,
     backendRiskResults,
     agentOutputs,
+    agentRunStates,
   };
 };
 
@@ -520,6 +608,7 @@ export const createInitialDemoState = (): DemoState => ({
   operationalStates: clone(mockOperationalStates),
   backendRiskResults: {},
   agentOutputs: {},
+  agentRunStates: {},
   backend: {
     mode: "local",
   },
@@ -751,6 +840,26 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
         ...state,
         backend: action.payload,
       };
+    case "SET_AGENT_FAILURE": {
+      const { [action.elderId]: _staleOutput, ...currentOutputs } = state.agentOutputs;
+      return {
+        ...state,
+        agentOutputs: currentOutputs,
+        agentRunStates: {
+          ...state.agentRunStates,
+          [action.elderId]: {
+            requestedProvider: action.requestedProvider,
+            model: null,
+            durationMs: null,
+            validationStatus: "failed",
+            fallbackUsed: true,
+            warning: action.warning,
+            createdAt: isoNow(),
+            hasCurrentOutput: false,
+          },
+        },
+      };
+    }
     case "RESET_DEMO":
       return createInitialDemoState();
     case "TRIGGER_CHEN_DIZZINESS": {
@@ -1067,7 +1176,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
             ...baseSnapshot,
             snapshotId: "LOCAL-APPLE-HEALTH-SAMPLE",
             dataSource: "Apple Health Export",
-            dataQuality: 88,
+            dataQuality: 0.88,
             heartRate: 84,
             restingHeartRate: 72,
             stepsToday: 980,
@@ -1234,8 +1343,8 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
                   wearTimeHours: latest.wearTimeHours,
                   dataCompleteness: latest.dataQuality,
                   dataQuality: latest.dataQuality,
-                  lastSyncedAt: latest.importedAt,
-                  importedAt: latest.importedAt,
+                  lastSyncedAt: latest.importedAt ?? currentSnapshot.lastSyncedAt,
+                  importedAt: latest.importedAt ?? currentSnapshot.importedAt,
                 },
               }
             : state.snapshots,
@@ -1253,11 +1362,11 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
                 [action.elderId]: {
                   ...currentDevice,
                   connectionStatus: "online",
-                  wearStatus: latest.wearTimeHours >= 6 ? "worn" : "not_worn",
-                  lastSyncAt: latest.importedAt,
+                  wearStatus: (latest.wearTimeHours ?? 0) >= 6 ? "worn" : "not_worn",
+                  lastSyncAt: latest.importedAt ?? currentDevice.lastSyncAt,
                   dataQuality: latest.dataQuality,
                   dataSource: action.source,
-                  todayWearTimeHours: latest.wearTimeHours,
+                  todayWearTimeHours: latest.wearTimeHours ?? 0,
                 },
               }
             : state.deviceRecords,
@@ -1353,7 +1462,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
                 ...currentSnapshot,
                 dataCompleteness: 0.8,
                 dataQuality: 0.8,
-                wearTimeHours: Math.max(currentSnapshot.wearTimeHours, 12),
+                wearTimeHours: Math.max(currentSnapshot.wearTimeHours ?? 0, 12),
                 lastSyncedAt: timestamp,
               }
             : currentSnapshot && action.eventType === "fall_detected"
@@ -1656,12 +1765,23 @@ const loadInitialState = () => {
   try {
     const parsed = JSON.parse(saved) as Partial<DemoState>;
     const initial = createInitialDemoState();
+    const migratedSnapshots = parsed.snapshots
+      ? Object.fromEntries(
+          Object.entries(parsed.snapshots).map(([elderId, snapshot]) => [
+            elderId,
+            {
+              ...snapshot,
+              dataQuality: migratePersistedDataQuality(snapshot.dataQuality),
+            },
+          ]),
+        )
+      : {};
     return {
       ...initial,
       ...parsed,
       profiles: { ...initial.profiles, ...parsed.profiles },
       baselines: { ...initial.baselines, ...parsed.baselines },
-      snapshots: { ...initial.snapshots, ...parsed.snapshots },
+      snapshots: { ...initial.snapshots, ...migratedSnapshots },
       medicationPlans: { ...initial.medicationPlans, ...parsed.medicationPlans },
       contacts: { ...initial.contacts, ...parsed.contacts },
       profileDetails: { ...initial.profileDetails, ...parsed.profileDetails },
@@ -1671,6 +1791,7 @@ const loadInitialState = () => {
       operationalStates: { ...initial.operationalStates, ...parsed.operationalStates },
       backendRiskResults: { ...initial.backendRiskResults, ...parsed.backendRiskResults },
       agentOutputs: { ...initial.agentOutputs, ...parsed.agentOutputs },
+      agentRunStates: { ...initial.agentRunStates, ...parsed.agentRunStates },
       backend: parsed.backend ?? initial.backend,
       initialCareMemoryByElderId:
         parsed.initialCareMemoryByElderId ?? initial.initialCareMemoryByElderId,
@@ -1690,19 +1811,83 @@ const loadInitialState = () => {
   }
 };
 
-const createAgentInput = (
-  state: DemoState,
+const normalizedHardwareEvent = (
   elderId: string,
-  riskResult: BackendRiskResult,
-  sourceEventId?: string,
-) => ({
-  elder_profile: { ...(state.profiles[elderId] ?? { elder_id: elderId }) },
-  daily_snapshot: { ...(state.snapshots[elderId] ?? { elder_id: elderId }) },
-  baseline: { ...(state.baselines[elderId] ?? {}) },
-  events: getEventsForElder(state, elderId).map((event) => ({ ...event })),
-  risk_result: { ...riskResult },
-  source_event_id: sourceEventId,
-});
+  eventType: CareEvent["eventType"],
+): BackendEventInput => {
+  const common = {
+    elder_id: elderId,
+    source: "esp32",
+    timestamp: new Date().toISOString(),
+  };
+  if (eventType === "button_confirm") {
+    return {
+      ...common,
+      event_type: "medication",
+      raw_text: "Short press confirmation",
+      payload: { action: "confirmed", button_pattern: "short_press" },
+    };
+  }
+  if (eventType === "sos_long_press" || eventType === "sos_triple_press" || eventType === "sos") {
+    return {
+      ...common,
+      event_type: "sos",
+      raw_text: "CareBand SOS request",
+      payload: {
+        action: eventType === "sos_triple_press" ? "triple_press" : "long_press",
+        button_pattern: eventType === "sos_triple_press" ? "triple_press" : "long_press",
+      },
+    };
+  }
+  if (["fall_detected", "inactivity_after_fall", "no_response_after_fall"].includes(eventType)) {
+    const action =
+      eventType === "no_response_after_fall"
+        ? "no_response"
+        : eventType === "inactivity_after_fall"
+          ? "inactivity_after_fall"
+          : "detected";
+    return {
+      ...common,
+      event_type: "fall",
+      raw_text: "CareBand fall signal requiring human verification",
+      payload: { action, confidence: eventType === "fall_detected" ? 0.9 : 0.85 },
+    };
+  }
+  const deviceActions: Record<string, string> = {
+    device_not_worn: "not_worn",
+    device_low_battery: "low_battery",
+    device_reconnected: "reconnected",
+    night_wakeup: "night_wakeup",
+    low_activity: "low_activity",
+  };
+  return {
+    ...common,
+    event_type: "device_status",
+    raw_text: "CareBand device status update",
+    payload: { action: deviceActions[eventType] ?? "status_update" },
+  };
+};
+
+const normalizedVoiceEvent = (elderId: string, text: string): BackendEventInput => {
+  const isWandering = text.includes("路") || text.toLowerCase().includes("lost");
+  const isMedicationQuery = text.includes("药") || text.toLowerCase().includes("medication");
+  return {
+    elder_id: elderId,
+    event_type: "voice",
+    source: "mobile_app",
+    timestamp: new Date().toISOString(),
+    raw_text: text,
+    payload: {
+      action: isWandering
+        ? "wandering_help"
+        : isMedicationQuery
+          ? "medication_query"
+          : "symptom_report",
+      transcript_summary: text.slice(0, 160),
+      symptom_keywords: isWandering || isMedicationQuery ? [] : [text],
+    },
+  };
+};
 
 export const DemoProvider = ({ children }: { children: ReactNode }) => {
   const [state, rawDispatch] = useReducer(demoReducer, undefined, loadInitialState);
@@ -1715,6 +1900,38 @@ export const DemoProvider = ({ children }: { children: ReactNode }) => {
       syncedAt: dashboard.generated_at,
     });
   }, [state]);
+
+  const submitEventAndRefresh = useCallback(
+    async (event: BackendEventInput) => {
+      const result = await submitNormalizedEvent(event);
+      try {
+        await refreshDashboard();
+      } catch (error) {
+        if (result.agentError) {
+          rawDispatch({
+            type: "SET_AGENT_FAILURE",
+            elderId: event.elder_id,
+            requestedProvider:
+              state.agentRunStates[event.elder_id]?.requestedProvider ??
+              (state.agentMode === "mock" ? "qwenpaw" : state.agentMode),
+            warning: result.agentError,
+          });
+        }
+        throw error;
+      }
+      if (result.agentError) {
+        rawDispatch({
+          type: "SET_AGENT_FAILURE",
+          elderId: event.elder_id,
+          requestedProvider:
+            state.agentRunStates[event.elder_id]?.requestedProvider ??
+            (state.agentMode === "mock" ? "qwenpaw" : state.agentMode),
+          warning: result.agentError,
+        });
+      }
+    },
+    [refreshDashboard, state.agentMode, state.agentRunStates],
+  );
 
   useEffect(() => {
     refreshDashboard().catch((error) => {
@@ -1738,38 +1955,35 @@ export const DemoProvider = ({ children }: { children: ReactNode }) => {
         }
 
         if (action.type === "RESET_DEMO") {
-          rawDispatch(action);
+          try {
+            await apiResetDemo();
+            const dashboard = await apiGetDashboard();
+            const fresh = createInitialDemoState();
+            rawDispatch(action);
+            rawDispatch({
+              type: "HYDRATE_FROM_BACKEND",
+              payload: mapDashboardToDemoState(dashboard, fresh),
+              syncedAt: dashboard.generated_at,
+            });
+          } catch (error) {
+            console.warn("CareBand backend reset fallback:", error);
+            rawDispatch(action);
+          }
           return;
         }
 
         try {
           if (action.type === "TRIGGER_CHEN_DIZZINESS") {
-            const response = await apiPostEvent({
-              elder_id: chenId,
-              event_type: "voice_symptom",
-              source: "demo",
-              raw_text: "我有点头晕，不太舒服",
-              payload: { symptom_keywords: ["头晕", "不舒服"] },
-            });
-            await apiAnalyzeAgent(
-              createAgentInput(state, chenId, response.risk_result, response.event.event_id),
-            ).catch(() => undefined);
-            await refreshDashboard();
+            await submitEventAndRefresh(
+              normalizedVoiceEvent(chenId, "我有点头晕，不太舒服"),
+            );
             return;
           }
 
           if (action.type === "TRIGGER_SOS") {
-            const response = await apiPostEvent({
-              elder_id: chenId,
-              event_type: "sos_long_press",
-              source: "demo",
-              raw_text: "SOS 长按求助",
-              payload: { button_press_seconds: 3 },
-            });
-            await apiAnalyzeAgent(
-              createAgentInput(state, chenId, response.risk_result, response.event.event_id),
-            ).catch(() => undefined);
-            await refreshDashboard();
+            await submitEventAndRefresh(
+              normalizedHardwareEvent(chenId, "sos_long_press"),
+            );
             return;
           }
 
@@ -1807,45 +2021,106 @@ export const DemoProvider = ({ children }: { children: ReactNode }) => {
             return;
           }
 
+          if (action.type === "TRIGGER_HARDWARE_EVENT") {
+            await submitEventAndRefresh(
+              normalizedHardwareEvent(action.elderId, action.eventType),
+            );
+            return;
+          }
+
+          if (action.type === "SIMULATE_FALL_EVENT") {
+            await submitEventAndRefresh(
+              normalizedHardwareEvent(action.elderId, action.stage),
+            );
+            return;
+          }
+
+          if (action.type === "SIMULATE_VOICE_INPUT") {
+            await submitEventAndRefresh(normalizedVoiceEvent(action.elderId, action.text));
+            return;
+          }
+
+          if (action.type === "SIMULATE_GEOFENCE_EXIT") {
+            await submitEventAndRefresh({
+              elder_id: action.elderId,
+              event_type: "location",
+              source: "dashboard",
+              timestamp: new Date().toISOString(),
+              raw_text: "Elder moved outside the configured safe zone.",
+              payload: { action: "geofence_exit", safe_zone_status: "outside" },
+            });
+            return;
+          }
+
+          if (action.type === "GENERATE_AGENT_SUMMARY") {
+            try {
+              await apiAnalyzeAgent({ elder_id: action.trace.elderId });
+              await refreshDashboard();
+            } catch (agentError) {
+              let dashboardUnavailable = false;
+              try {
+                await refreshDashboard();
+              } catch {
+                dashboardUnavailable = true;
+              }
+              rawDispatch({
+                type: "SET_AGENT_FAILURE",
+                elderId: action.trace.elderId,
+                requestedProvider:
+                  state.agentRunStates[action.trace.elderId]?.requestedProvider ??
+                  (state.agentMode === "mock" ? "qwenpaw" : state.agentMode),
+                warning:
+                  agentError instanceof Error
+                    ? agentError.message
+                    : "Agent request failed.",
+              });
+              if (dashboardUnavailable) throw agentError;
+            }
+            return;
+          }
+
           if (action.type === "CAREGIVER_ACCEPT_TASK") {
             const activeTask = selectActiveTaskForElder(chenId, state.tasks);
             if (!activeTask) throw new Error("No active task to accept.");
             await apiPatchTask(activeTask.taskId, {
-              status: "in_progress",
+              status: "acknowledged",
               handled_by: "护工A",
             });
-            await apiPostEvent({
+            await submitEventAndRefresh({
               elder_id: chenId,
-              event_type: "caregiver_accepted",
-              source: "caregiver",
+              event_type: "manual_note",
+              source: "dashboard",
               raw_text: "护工A已接单，正在查看陈伯情况",
-              payload: { note: "护工A已接单" },
+              payload: { action: "caregiver_accepted", note: "护工A已接单" },
             });
-            await refreshDashboard();
             return;
           }
 
           if (action.type === "CAREGIVER_MARK_VIEWED") {
-            await apiPostEvent({
-              elder_id: chenId,
-              event_type: "caregiver_checked",
-              source: "caregiver",
-              raw_text: "护工A已到场查看陈伯",
-              payload: { note: "护工A已到场查看" },
+            const activeTask = selectActiveTaskForElder(chenId, state.tasks);
+            if (!activeTask) throw new Error("No active task to mark viewed.");
+            await apiPatchTask(activeTask.taskId, {
+              status: "in_progress",
+              handled_by: "护工A",
             });
-            await refreshDashboard();
+            await submitEventAndRefresh({
+              elder_id: chenId,
+              event_type: "manual_note",
+              source: "dashboard",
+              raw_text: "护工A已到场查看陈伯",
+              payload: { action: "caregiver_checked", note: "护工A已到场查看" },
+            });
             return;
           }
 
           if (action.type === "CONFIRM_EVENING_MEDICATION") {
-            await apiPostEvent({
+            await submitEventAndRefresh({
               elder_id: chenId,
-              event_type: "medication_confirmed",
-              source: "caregiver",
+              event_type: "medication",
+              source: "dashboard",
               raw_text: "晚药已确认",
-              payload: { medication_name: "晚药" },
+              payload: { action: "confirmed", medication_name: "晚药" },
             });
-            await refreshDashboard();
             return;
           }
 
@@ -1854,25 +2129,78 @@ export const DemoProvider = ({ children }: { children: ReactNode }) => {
             if (!activeTask) throw new Error("No active task to complete.");
             const handledNote =
               "护工A已查看陈伯，已确认晚药，目前在房间休息，建议明早继续关注活动和睡眠。";
-            await apiPatchTask(activeTask.taskId, {
-              status: "completed",
-              handled_by: "护工A",
-              handled_note: handledNote,
-            });
-            await apiPostEvent({
-              elder_id: chenId,
-              event_type: "caregiver_completed",
-              source: "caregiver",
-              raw_text: handledNote,
-              payload: { note: handledNote },
-            });
-            await refreshDashboard();
+            await completeCareTaskOnBackend(
+              {
+                taskId: activeTask.taskId,
+                elderId: chenId,
+                handledBy: "护工A",
+                handledNote,
+              },
+              { patchTask: apiPatchTask, submitEvent: submitEventAndRefresh },
+            );
             return;
           }
 
           rawDispatch(action);
         } catch (error) {
           console.warn("CareBand backend action fallback:", error);
+          const isTaskMutation = isBackendAuthoritativeTaskAction(action.type);
+          if (isTaskMutation) {
+            try {
+              await refreshDashboard();
+              rawDispatch({
+                type: "SET_BACKEND_STATUS",
+                payload: {
+                  mode: "connected",
+                  lastSyncedAt: state.backend.lastSyncedAt,
+                  error: `任务流程未完整执行：${
+                    error instanceof Error ? error.message : "未知后端错误"
+                  }`,
+                },
+              });
+            } catch (refreshError) {
+              rawDispatch({
+                type: "SET_BACKEND_STATUS",
+                payload: {
+                  mode: "unavailable",
+                  error:
+                    refreshError instanceof Error
+                      ? refreshError.message
+                      : backendFallbackMessage,
+                },
+              });
+            }
+            return;
+          }
+          const fallbackElderId =
+            action.type === "TRIGGER_HARDWARE_EVENT" ||
+            action.type === "SIMULATE_FALL_EVENT" ||
+            action.type === "SIMULATE_VOICE_INPUT" ||
+            action.type === "SIMULATE_GEOFENCE_EXIT"
+              ? action.elderId
+              : action.type === "TRIGGER_CHEN_DIZZINESS" ||
+                  action.type === "TRIGGER_SOS" ||
+                  action.type === "CAREGIVER_ACCEPT_TASK" ||
+                  action.type === "CAREGIVER_MARK_VIEWED" ||
+                  action.type === "CONFIRM_EVENING_MEDICATION" ||
+                  action.type === "COMPLETE_CARE_TASK"
+                ? chenId
+                : action.type === "GENERATE_AGENT_SUMMARY"
+                  ? action.trace.elderId
+                  : null;
+          if (fallbackElderId) {
+            rawDispatch({
+              type: "SET_AGENT_FAILURE",
+              elderId: fallbackElderId,
+              requestedProvider:
+                state.agentRunStates[fallbackElderId]?.requestedProvider ??
+                (state.agentMode === "mock" ? "qwenpaw" : state.agentMode),
+              warning:
+                error instanceof Error
+                  ? error.message
+                  : "Backend unavailable; using deterministic local fallback.",
+            });
+          }
           rawDispatch({
             type: "SET_BACKEND_STATUS",
             payload: {
@@ -1886,7 +2214,7 @@ export const DemoProvider = ({ children }: { children: ReactNode }) => {
 
       void run();
     },
-    [refreshDashboard, state],
+    [refreshDashboard, state, submitEventAndRefresh],
   );
 
   useEffect(() => {
@@ -1938,17 +2266,27 @@ export const getAgentSummariesForElder = (
 ): AgentRoleSummaries => {
   const agentOutput = state.agentOutputs[elderId];
   if (agentOutput) {
+    const sourceLabel = {
+      qwenpaw: "真实 QwenPaw",
+      openai: "真实 OpenAI",
+      mock: agentOutput.fallbackUsed ? "Mock fallback" : "确定性 Mock",
+    }[agentOutput.agentSource];
     return {
       caregiverSummary: agentOutput.caregiverSummary,
       familySummary: agentOutput.familySummary,
       institutionSummary: agentOutput.institutionSummary,
       decisionTrace: [
-        `Agent 来源：${agentOutput.agentSource === "openai" ? "OpenAI" : "Mock Agent"}`,
+        `Agent 来源：${sourceLabel}`,
         ...agentOutput.keyReasons,
         `建议动作：${agentOutput.recommendedAction}`,
         agentOutput.safetyDisclaimer,
       ],
       agentSource: agentOutput.agentSource,
+      requestedProvider: agentOutput.requestedProvider,
+      model: agentOutput.model,
+      durationMs: agentOutput.durationMs,
+      validationStatus: agentOutput.validationStatus,
+      fallbackUsed: agentOutput.fallbackUsed,
       warning: agentOutput.warning,
       generatedAt: agentOutput.createdAt,
     };
@@ -1959,7 +2297,7 @@ export const getAgentSummariesForElder = (
   const careLoopStatus = deriveCareLoopStatus(elderId, state.tasks, events);
   const displayStatus = deriveDisplayStatus(risk, careLoopStatus);
 
-  return generateAgentSummaries(
+  const localSummaries = generateAgentSummaries(
     state.profiles[elderId],
     state.baselines[elderId],
     state.snapshots[elderId],
@@ -1968,6 +2306,20 @@ export const getAgentSummariesForElder = (
     careLoopStatus,
     displayStatus,
   );
+  const latestRun = state.agentRunStates[elderId];
+  if (!latestRun || latestRun.hasCurrentOutput) return localSummaries;
+
+  return {
+    ...localSummaries,
+    agentSource: "mock",
+    requestedProvider: latestRun.requestedProvider,
+    model: latestRun.model,
+    durationMs: latestRun.durationMs,
+    validationStatus: latestRun.validationStatus,
+    fallbackUsed: true,
+    warning: latestRun.warning ?? "Latest Agent run failed; using deterministic local fallback.",
+    generatedAt: latestRun.createdAt,
+  };
 };
 
 export const getAgentTraceForElder = (

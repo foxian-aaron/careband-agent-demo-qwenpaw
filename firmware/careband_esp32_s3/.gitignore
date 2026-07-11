@@ -1,0 +1,4 @@
+.pio/
+.venv/
+.vscode/
+include/config_local.h

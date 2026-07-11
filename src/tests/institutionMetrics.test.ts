@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveInstitutionMetrics,
+  isOperationalSubject,
+  isSameCareDay,
   type InstitutionElderRowInput,
 } from "../lib/institutionMetrics";
 import { deriveCareLoopStatus, deriveDisplayStatus } from "../lib/displayStatus";
@@ -28,6 +30,17 @@ const row = (
 });
 
 describe("deriveInstitutionMetrics", () => {
+  it("keeps team-test subjects out of operational queues", () => {
+    expect(isOperationalSubject("elder")).toBe(true);
+    expect(isOperationalSubject("team_test")).toBe(false);
+  });
+
+  it("compares today history in Macau time instead of against snapshot date", () => {
+    const reference = "2026-07-11T03:00:00.000Z";
+    expect(isSameCareDay("2026-07-10T16:30:00.000Z", reference)).toBe(true);
+    expect(isSameCareDay("2026-07-10T15:59:59.000Z", reference)).toBe(false);
+  });
+
   it("does not count Chen initial attention state as high risk", () => {
     const metrics = deriveInstitutionMetrics([row({})]);
 
@@ -113,6 +126,40 @@ describe("deriveInstitutionMetrics", () => {
 
     expect(metrics.averageDataCompleteness).toBe(66);
   });
+
+  it("excludes team wearable test profiles from institution operating metrics", () => {
+    const metrics = deriveInstitutionMetrics([
+      row({ elderId: "E001", dataCompleteness: 0.8 }),
+      row({
+        elderId: "TEST001",
+        isTeamTest: true,
+        riskLevel: "urgent",
+        careLoopStatus: "pending",
+        taskStatus: "pending",
+        dataCompleteness: 0.2,
+      }),
+    ]);
+
+    expect(metrics.currentOpenHighRiskCount).toBe(0);
+    expect(metrics.todayEverHighRiskCount).toBe(0);
+    expect(metrics.pendingTaskCount).toBe(0);
+    expect(metrics.averageDataCompleteness).toBe(80);
+  });
+
+  it("keeps a same-day resolved high-risk task in today-ever history after current risk drops", () => {
+    const metrics = deriveInstitutionMetrics([
+      row({
+        riskLevel: "attention",
+        careLoopStatus: "completed",
+        taskStatus: "completed",
+        hadHighRiskToday: true,
+      }),
+    ]);
+
+    expect(metrics.currentOpenHighRiskCount).toBe(0);
+    expect(metrics.todayEverHighRiskCount).toBe(1);
+    expect(metrics.followedUpHighRiskCount).toBe(1);
+  });
 });
 
 const metricsFromDemoState = (state: DemoState) =>
@@ -135,6 +182,7 @@ const metricsFromDemoState = (state: DemoState) =>
         careLoopStatus,
         taskStatus: task?.status,
         dataCompleteness: risk.dataCompleteness,
+        isTeamTest: profile.subjectKind === "team_test",
       };
     }),
   );

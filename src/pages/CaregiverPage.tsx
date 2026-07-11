@@ -1,12 +1,15 @@
 import { CareTaskCard } from "../components/CareTaskCard";
+import { AgentSourceBadge } from "../components/AgentSourceBadge";
 import { ElderSummaryCard } from "../components/ElderSummaryCard";
 import { EmptyState } from "../components/EmptyState";
 import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { Timeline } from "../components/Timeline";
 import { deriveCareLoopStatus, deriveDisplayStatus } from "../lib/displayStatus";
+import { isOperationalSubject } from "../lib/institutionMetrics";
 import {
   getEventsForElder,
   getActiveTaskForElder,
+  getAgentSummariesForElder,
   getRiskForElder,
   useDemo,
 } from "../store/demoStore";
@@ -16,25 +19,32 @@ const priorityOrder = { urgent: 4, high: 3, medium: 2, low: 1 };
 export const CaregiverPage = () => {
   const { state, dispatch } = useDemo();
   const tasks = state.tasks
-    .filter((task) => task.status !== "completed")
+    .filter((task) => isOperationalSubject(state.profiles[task.elderId]?.subjectKind))
+    .filter((task) => task.status !== "completed" && task.status !== "cancelled")
     .sort(
     (a, b) => priorityOrder[b.priority] - priorityOrder[a.priority],
   );
   const historyTasks = state.tasks
-    .filter((task) => task.status === "completed")
+    .filter((task) => isOperationalSubject(state.profiles[task.elderId]?.subjectKind))
+    .filter((task) => task.status === "completed" || task.status === "cancelled")
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const profiles = Object.values(state.profiles);
+  const profiles = Object.values(state.profiles).filter((profile) =>
+    isOperationalSubject(profile.subjectKind),
+  );
   const highRiskProfiles = profiles.filter((profile) =>
     ["urgent", "high_risk"].includes(getRiskForElder(state, profile.elderId).riskLevel),
   );
   const attentionProfiles = profiles.filter(
     (profile) => getRiskForElder(state, profile.elderId).riskLevel === "attention",
   );
-  const operationEvents = state.events.filter((event) =>
-    ["caregiver_accepted", "caregiver_checked", "caregiver_completed", "medication_confirmed", "system_risk_update", "voice_symptom"].includes(
-      event.eventType,
-    ),
+  const operationEvents = state.events.filter(
+    (event) =>
+      isOperationalSubject(state.profiles[event.elderId]?.subjectKind) &&
+      ["caregiver_accepted", "caregiver_checked", "caregiver_completed", "medication_confirmed", "system_risk_update", "voice_symptom"].includes(
+        event.eventType,
+      ),
   );
+  const chenSummaries = getAgentSummariesForElder(state, "E001");
 
   return (
     <div className="page">
@@ -45,6 +55,15 @@ export const CaregiverPage = () => {
           <p>打开页面后先看高优先级任务，再看需关注长者。</p>
         </div>
       </header>
+
+      <section className="panel ai-summary-card">
+        <div className="section-title">
+          <span>陈伯 E001 · 护工摘要</span>
+          <h2>Agent 建议的现场核查重点</h2>
+        </div>
+        <p>{chenSummaries.caregiverSummary}</p>
+        <AgentSourceBadge summaries={chenSummaries} />
+      </section>
 
       <section className="panel">
         <div className="section-title">
@@ -139,7 +158,7 @@ export const CaregiverPage = () => {
       <section className="panel">
         <div className="section-title">
           <span>历史处理记录</span>
-          <h2>已完成任务</h2>
+            <h2>已结束任务</h2>
         </div>
         <div className="task-list task-list--history">
           {historyTasks.length ? (

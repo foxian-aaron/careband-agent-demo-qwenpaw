@@ -15,6 +15,7 @@ import { UnknownElderState } from "../components/UnknownElderState";
 import { WearableDataSourceBadge } from "../components/WearableDataSourceBadge";
 import { WeeklyTrendSummary } from "../components/WeeklyTrendSummary";
 import { formatDateTime } from "../lib/dateUtils";
+import { ratioDataQualityToPercent } from "../lib/dataQuality";
 import { deriveCareLoopStatus, deriveDisplayStatus, displayToneToPillTone } from "../lib/displayStatus";
 import { getElderViewModel } from "../lib/elderView";
 import {
@@ -90,6 +91,7 @@ export const ElderDashboardPage = ({ elderId }: ElderDashboardPageProps) => {
   const careLoopStatus = deriveCareLoopStatus(profile.elderId, state.tasks, events);
   const displayStatus = deriveDisplayStatus(risk, careLoopStatus);
   const identityNotice = getIdentityNotice(profile.elderId);
+  const snapshotQuality = snapshot.dataQuality ?? snapshot.dataCompleteness;
   const stepDeviation =
     snapshot.stepsToday === null
       ? null
@@ -132,8 +134,8 @@ export const ElderDashboardPage = ({ elderId }: ElderDashboardPageProps) => {
               tone={snapshot.dataSource === "Apple Health Export" ? "observation" : "stable"}
             />
             <StatusPill
-              label={`数据质量 ${Math.round(snapshot.dataQuality ?? snapshot.dataCompleteness * 100)}%`}
-              tone={(snapshot.dataQuality ?? snapshot.dataCompleteness * 100) < 40 ? "muted" : "stable"}
+              label={`数据质量 ${ratioDataQualityToPercent(snapshotQuality)}%`}
+              tone={snapshotQuality < 0.4 ? "muted" : "stable"}
             />
             <StatusPill label={`快照日期：${snapshot.date}`} tone="stable" />
             <StatusPill
@@ -264,9 +266,7 @@ export const ElderDashboardPage = ({ elderId }: ElderDashboardPageProps) => {
             deviation={
               snapshot.restingHeartRate === null || snapshot.restingHeartRate === undefined
                 ? "數據缺失"
-                : `${snapshot.restingHeartRate - baseline.restingHrBaseline > 0 ? "+" : ""}${
-                    snapshot.restingHeartRate - baseline.restingHrBaseline
-                  } bpm`
+                : `${formatSigned(snapshot.restingHeartRate - baseline.restingHrBaseline, 1)} bpm`
             }
             explanation="Apple Health Export 的靜息心率只用於和個人基線對照。"
             tone={
@@ -323,19 +323,25 @@ export const ElderDashboardPage = ({ elderId }: ElderDashboardPageProps) => {
           />
           <MetricCard
             title="佩戴时间"
-            todayValue={`${snapshot.wearTimeHours} 小时`}
+            todayValue={snapshot.wearTimeHours === null ? "数据缺失" : `${snapshot.wearTimeHours} 小时`}
             baselineValue="建议全天候佩戴"
-            deviation={snapshot.wearTimeHours >= 12 ? "数据可参考" : "佩戴不足"}
+            deviation={
+              snapshot.wearTimeHours === null
+                ? "数据缺失"
+                : snapshot.wearTimeHours >= 12
+                  ? "数据可参考"
+                  : "佩戴不足"
+            }
             explanation="佩戴时间影响状态判断置信度。"
-            tone={snapshot.wearTimeHours >= 12 ? "stable" : "muted"}
+            tone={snapshot.wearTimeHours !== null && snapshot.wearTimeHours >= 12 ? "stable" : "muted"}
           />
           <MetricCard
             title="数据质量"
-            todayValue={`${Math.round(snapshot.dataQuality ?? snapshot.dataCompleteness * 100)}%`}
+            todayValue={`${ratioDataQualityToPercent(snapshotQuality)}%`}
             baselineValue={`基线置信度 ${Math.round(baseline.baselineConfidence * 100)}%`}
             deviation={snapshot.dataSource ?? "本地 Mock"}
             explanation="数据质量低时系统会优先提示确认设备佩戴，不做过度判断。"
-            tone={(snapshot.dataQuality ?? snapshot.dataCompleteness * 100) < 40 ? "muted" : "stable"}
+            tone={snapshotQuality < 0.4 ? "muted" : "stable"}
           />
         </div>
       </section>
@@ -370,12 +376,16 @@ export const ElderDashboardPage = ({ elderId }: ElderDashboardPageProps) => {
         <div className="trend-grid">
           <TrendMiniChart
             title="步数趋势"
-            points={trend.points.map((point) => ({ label: point.date, value: point.steps }))}
+            points={trend.points.flatMap((point) =>
+              point.steps === null ? [] : [{ label: point.date, value: point.steps }],
+            )}
             unit="步"
           />
           <TrendMiniChart
             title="睡眠趋势"
-            points={trend.points.map((point) => ({ label: point.date, value: point.sleepHours }))}
+            points={trend.points.flatMap((point) =>
+              point.sleepHours === null ? [] : [{ label: point.date, value: point.sleepHours }],
+            )}
             unit="小时"
           />
           <TrendMiniChart

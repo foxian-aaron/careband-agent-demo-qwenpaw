@@ -11,6 +11,7 @@ describe("elder view routing safeguards", () => {
     expect(view.found).toBe(true);
     if (!view.found) return;
     expect(view.profile.elderId).toBe("TEST001");
+    expect(view.profile.subjectKind).toBe("team_test");
     expect(view.profile.name).toBe("團隊 Apple Watch 測試資料");
     expect(view.profile.riskTags).toContain("非真實長者");
     expect(view.snapshot.dataSource).toBe("Apple Health Export");
@@ -49,4 +50,3 @@ describe("elder view routing safeguards", () => {
     expect(runtime.backendText).toContain("後端未連接");
   });
 });
-

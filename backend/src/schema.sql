@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS elders (
   age INTEGER NOT NULL,
   room TEXT NOT NULL,
   risk_tags TEXT NOT NULL,
+  subject_kind TEXT NOT NULL DEFAULT 'elder',
   created_at TEXT NOT NULL
 );
 
@@ -34,6 +35,13 @@ CREATE TABLE IF NOT EXISTS events (
   source TEXT NOT NULL,
   raw_text TEXT,
   payload TEXT NOT NULL,
+  received_at TEXT,
+  severity_hint TEXT NOT NULL DEFAULT 'info',
+  data_quality TEXT NOT NULL DEFAULT 'medium',
+  status TEXT NOT NULL DEFAULT 'open',
+  resolved_at TEXT,
+  resolved_by TEXT,
+  linked_task_id TEXT,
   created_at TEXT NOT NULL,
   FOREIGN KEY (elder_id) REFERENCES elders(elder_id)
 );
@@ -53,6 +61,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   handled_by TEXT,
   handled_note TEXT,
   created_at TEXT NOT NULL,
+  updated_at TEXT,
   completed_at TEXT,
   FOREIGN KEY (elder_id) REFERENCES elders(elder_id)
 );
@@ -80,3 +89,60 @@ CREATE TABLE IF NOT EXISTS agent_outputs (
 
 CREATE INDEX IF NOT EXISTS idx_agent_outputs_elder_time
   ON agent_outputs (elder_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  run_id TEXT PRIMARY KEY,
+  elder_id TEXT NOT NULL,
+  source_event_id TEXT,
+  provider TEXT NOT NULL,
+  model TEXT,
+  started_at TEXT NOT NULL,
+  duration_ms INTEGER,
+  validation_status TEXT NOT NULL,
+  fallback_used INTEGER NOT NULL DEFAULT 0,
+  error_reason TEXT,
+  input_summary TEXT NOT NULL DEFAULT '{}',
+  raw_response_excerpt TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (elder_id) REFERENCES elders(elder_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_elder_time
+  ON agent_runs (elder_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS import_runs (
+  import_id TEXT PRIMARY KEY,
+  elder_id TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  file_name TEXT,
+  status TEXT NOT NULL,
+  snapshot_count INTEGER NOT NULL DEFAULT 0,
+  date_start TEXT,
+  date_end TEXT,
+  quality_summary TEXT NOT NULL DEFAULT '{}',
+  warnings TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (elder_id) REFERENCES elders(elder_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_runs_elder_time
+  ON import_runs (elder_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  audit_id TEXT PRIMARY KEY,
+  elder_id TEXT,
+  action TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id TEXT,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_elder_time
+  ON audit_logs (elder_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  migration_id TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL
+);

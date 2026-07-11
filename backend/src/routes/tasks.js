@@ -13,7 +13,13 @@ tasksRouter.patch("/:id", (req, res, next) => {
       return;
     }
 
-    res.json({ ok: true, task });
+    res.json({
+      ok: true,
+      task,
+      task_id: task.task_id,
+      status: task.status,
+      updated_at: task.updated_at,
+    });
   } catch (error) {
     next(error);
   }

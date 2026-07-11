@@ -8,6 +8,7 @@ import {
 } from "../store/demoStore";
 import { FutureIntegrationBadge } from "./FutureIntegrationBadge";
 import { MockNoticeBanner } from "./MockNoticeBanner";
+import { AgentSourceBadge } from "./AgentSourceBadge";
 
 interface AgentTracePanelProps {
   elderId: string;
@@ -42,7 +43,7 @@ export const AgentTracePanel = ({ elderId }: AgentTracePanelProps) => {
         </div>
         <div className="button-row">
           <button onClick={() => dispatch({ type: "GENERATE_AGENT_SUMMARY", trace: buildTrace("ready") })}>
-            重新生成 Agent 摘要（Mock）
+            重新生成 Agent 摘要
           </button>
           <button onClick={() => dispatch({ type: "SIMULATE_AGENT_FAILURE", elderId })}>
             模拟 Agent 失败
@@ -57,11 +58,12 @@ export const AgentTracePanel = ({ elderId }: AgentTracePanelProps) => {
           </button>
         </div>
       </div>
-      <MockNoticeBanner>当前为 Mock Agent，后续可替换为 QwenPaw / LLM；医疗边界由规则层和摘要层同时展示。</MockNoticeBanner>
+      <MockNoticeBanner>规则引擎固定风险等级，Agent 只生成三端摘要；真实 Provider 失败时会明确显示 Mock fallback。</MockNoticeBanner>
+      <AgentSourceBadge summaries={summaries} />
       <div className="tag-row">
-        <FutureIntegrationBadge label={trace.status === "failed" ? "Mock Agent Failed" : "Mock Agent"} />
-        <FutureIntegrationBadge label="Future QwenPaw Integration" />
-        <FutureIntegrationBadge label="JSON Schema Validated" />
+        <FutureIntegrationBadge label={trace.status === "failed" ? "Agent Failed" : "Agent Ready"} />
+        <FutureIntegrationBadge label={`Provider: ${summaries.requestedProvider ?? summaries.agentSource ?? "mock"}`} />
+        <FutureIntegrationBadge label={`JSON: ${summaries.validationStatus ?? "local_mock"}`} />
         <FutureIntegrationBadge label="Fallback Ready" />
       </div>
       {trace.status === "failed" ? (

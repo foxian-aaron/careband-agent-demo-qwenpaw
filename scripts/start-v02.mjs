@@ -10,8 +10,8 @@ const env = {
   ...process.env,
   PORT: process.env.PORT ?? "3001",
   FRONTEND_PORT: process.env.FRONTEND_PORT ?? "5173",
-  CORS_ORIGIN: process.env.CORS_ORIGIN ?? "http://localhost:5173",
-  VITE_API_BASE_URL: process.env.VITE_API_BASE_URL ?? "http://localhost:3001",
+  CORS_ORIGIN: process.env.CORS_ORIGIN ?? "http://127.0.0.1:5173",
+  VITE_API_BASE_URL: process.env.VITE_API_BASE_URL ?? "http://127.0.0.1:3001",
 };
 
 const children = [
@@ -20,7 +20,7 @@ const children = [
     env,
     stdio: "inherit",
   }),
-  spawn(node, ["node_modules/vite/bin/vite.js", "--host", "0.0.0.0", "--port", env.FRONTEND_PORT], {
+  spawn(node, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", env.FRONTEND_PORT], {
     cwd: projectRoot,
     env,
     stdio: "inherit",

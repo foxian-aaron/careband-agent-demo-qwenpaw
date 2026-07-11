@@ -1,68 +1,30 @@
 import OpenAI from "openai";
-import { z } from "zod";
-import { SAFETY_DISCLAIMER } from "../constants.js";
+import { agentOutputJsonSchema } from "./agentOutputValidator.js";
 import { runMockAgent } from "./mockAgent.js";
-
-export const agentOutputSchema = z.object({
-  status_level: z.enum([
-    "stable",
-    "observe",
-    "attention",
-    "high_risk",
-    "urgent",
-    "insufficient_data",
-  ]),
-  risk_score: z.number().min(0).max(100),
-  key_reasons: z.array(z.string()),
-  caregiver_summary: z.string(),
-  family_summary: z.string(),
-  institution_summary: z.string(),
-  recommended_action: z.string(),
-  safety_disclaimer: z.literal(SAFETY_DISCLAIMER),
-});
-
-const responseJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    status_level: {
-      type: "string",
-      enum: ["stable", "observe", "attention", "high_risk", "urgent", "insufficient_data"],
-    },
-    risk_score: { type: "number" },
-    key_reasons: { type: "array", items: { type: "string" } },
-    caregiver_summary: { type: "string" },
-    family_summary: { type: "string" },
-    institution_summary: { type: "string" },
-    recommended_action: { type: "string" },
-    safety_disclaimer: { type: "string", enum: [SAFETY_DISCLAIMER] },
-  },
-  required: [
-    "status_level",
-    "risk_score",
-    "key_reasons",
-    "caregiver_summary",
-    "family_summary",
-    "institution_summary",
-    "recommended_action",
-    "safety_disclaimer",
-  ],
-};
 
 const agentTimeoutMs = () => {
   const configured = Number(process.env.AGENT_TIMEOUT_MS ?? 30000);
   return Number.isFinite(configured) && configured > 0 ? configured : 30000;
 };
 
-const withTimeout = (promise, timeoutMs) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Agent request timed out after ${timeoutMs}ms`)), timeoutMs),
-    ),
-  ]);
+const withTimeout = async (promise, timeoutMs) => {
+  let timeout;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`Agent request timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+};
 
-const buildPromptInput = (input) =>
+export const buildOpenAiPromptInput = (input, { repairErrors = [] } = {}) =>
   JSON.stringify(
     {
       elder_profile: input.elder_profile,
@@ -72,12 +34,19 @@ const buildPromptInput = (input) =>
       risk_result: input.risk_result,
       hard_safety_rule:
         "Explain care-risk signals only. Do not invent a medical diagnosis, disease, prescription, or clinical conclusion.",
+      ...(repairErrors.length
+        ? {
+            validation_repair_errors: repairErrors,
+            repair_instruction:
+              "Correct every listed validation error while copying the deterministic risk fields exactly.",
+          }
+        : {}),
     },
     null,
     2,
   );
 
-async function runOpenAiAgent(input) {
+export async function runOpenAiAgent(input, options = {}) {
   const timeout = agentTimeoutMs();
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout });
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -87,13 +56,13 @@ async function runOpenAiAgent(input) {
       model,
       instructions:
         "You are an elderly-care AI Agent for a demo. Generate concise, actionable, non-diagnostic caregiver, family, and institution summaries from the deterministic risk result and daily aggregate data. Return only JSON matching the schema.",
-      input: buildPromptInput(input),
+      input: buildOpenAiPromptInput(input, options),
       text: {
         format: {
           type: "json_schema",
           name: "careband_agent_output",
           strict: true,
-          schema: responseJsonSchema,
+          schema: agentOutputJsonSchema,
         },
       },
     }),
@@ -103,26 +72,28 @@ async function runOpenAiAgent(input) {
   const text = response.output_text;
   if (!text) throw new Error("OpenAI response did not include output_text.");
 
-  const parsed = JSON.parse(text);
-  return agentOutputSchema.parse({
-    ...parsed,
-    safety_disclaimer: SAFETY_DISCLAIMER,
-  });
+  return {
+    result: JSON.parse(text),
+    rawResponse: text,
+    responseId: response.id ?? null,
+  };
 }
 
 export async function analyzeWithFallback(input) {
   if (!process.env.OPENAI_API_KEY || process.env.USE_MOCK_AGENT === "true") {
-    return runMockAgent(input);
+    return { ...runMockAgent(input), agent_source: "mock" };
   }
 
   try {
+    const response = await runOpenAiAgent(input);
     return {
-      ...(await runOpenAiAgent(input)),
+      ...response.result,
       agent_source: "openai",
     };
   } catch (error) {
     return {
       ...runMockAgent(input),
+      agent_source: "mock",
       warning: `OpenAI call failed; mock Agent fallback used: ${error.message}`,
     };
   }

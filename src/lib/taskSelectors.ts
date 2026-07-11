@@ -5,7 +5,12 @@ export const byTaskUpdatedDesc = (a: CareTask, b: CareTask) =>
 
 export const getActiveTaskForElder = (elderId: string, tasks: CareTask[]) =>
   tasks
-    .filter((task) => task.elderId === elderId && task.status !== "completed")
+    .filter(
+      (task) =>
+        task.elderId === elderId &&
+        task.status !== "completed" &&
+        task.status !== "cancelled",
+    )
     .sort(byTaskUpdatedDesc)[0];
 
 export const getTaskHistoryForElder = (elderId: string, tasks: CareTask[]) =>

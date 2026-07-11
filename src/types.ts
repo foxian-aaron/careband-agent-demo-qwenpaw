@@ -36,6 +36,7 @@ export interface ElderProfile {
   riskTags: string[];
   caregiverId: string;
   familyContactId: string;
+  subjectKind?: "elder" | "team_test";
 }
 
 export interface PersonalBaseline {
@@ -78,7 +79,7 @@ export interface DailySnapshot {
   sleepDuration: number | null;
   medicationMorning: MedicationStatus;
   medicationEvening: MedicationStatus;
-  wearTimeHours: number;
+  wearTimeHours: number | null;
   locationZone: string;
   safeZoneStatus: "inside" | "outside" | "unknown";
   fallDetected: boolean;
@@ -238,7 +239,7 @@ export interface CareTask {
   reason: string;
   recommendedAction: string;
   assignedTo: string;
-  status: "pending" | "in_progress" | "completed";
+  status: "pending" | "in_progress" | "completed" | "cancelled";
   sourceType?: CareTaskSource;
   agentSummarySource?: AgentSummarySource;
   createdAt: string;
@@ -254,7 +255,12 @@ export interface AgentRoleSummaries {
   familySummary: string;
   institutionSummary: string;
   decisionTrace: string[];
-  agentSource?: "mock" | "openai";
+  agentSource?: "mock" | "qwenpaw" | "openai";
+  requestedProvider?: "mock" | "qwenpaw" | "openai";
+  model?: string | null;
+  durationMs?: number | null;
+  validationStatus?: "valid" | "fallback_valid" | "failed";
+  fallbackUsed?: boolean;
   warning?: string | null;
   generatedAt?: string;
 }
@@ -267,11 +273,11 @@ export type CareTaskSource =
   | "location_event"
   | "agent";
 
-export type AgentMode = "mock" | "future_qwenpaw";
+export type AgentMode = "mock" | "qwenpaw" | "openai";
 
 export type AgentRunStatus = "ready" | "failed" | "fallback_rule";
 
-export type AgentSummarySource = "mock" | "future_qwenpaw" | "fallback_rule";
+export type AgentSummarySource = "mock" | "qwenpaw" | "openai" | "fallback_rule";
 
 export type MemorySourceType =
   | "family_oral"
@@ -332,14 +338,14 @@ export interface WearableDailySnapshot {
   elderId: string;
   date: string;
   dataSource: WearableDataSource;
-  heartRateAvg: number;
-  restingHeartRate: number;
-  steps: number;
-  activeMinutes: number;
-  sleepDuration: number;
-  wearTimeHours: number;
+  heartRateAvg: number | null;
+  restingHeartRate: number | null;
+  steps: number | null;
+  activeMinutes: number | null;
+  sleepDuration: number | null;
+  wearTimeHours: number | null;
   dataQuality: number;
-  importedAt: string;
+  importedAt: string | null;
 }
 
 export interface WearableImportRecord {
@@ -424,7 +430,7 @@ export interface AgentOutput {
   outputId: string;
   elderId: string;
   sourceEventId?: string | null;
-  statusLevel: "stable" | "observe" | "attention" | "high_risk" | "urgent" | "insufficient_data";
+  statusLevel: RiskLevel;
   riskScore: number;
   caregiverSummary: string;
   familySummary: string;
@@ -432,15 +438,20 @@ export interface AgentOutput {
   recommendedAction: string;
   safetyDisclaimer: string;
   keyReasons: string[];
-  agentSource: "mock" | "openai";
+  agentSource: "mock" | "qwenpaw" | "openai";
+  requestedProvider?: "mock" | "qwenpaw" | "openai";
+  model?: string | null;
+  durationMs?: number | null;
+  validationStatus?: "valid" | "fallback_valid" | "failed";
+  fallbackUsed?: boolean;
   warning?: string | null;
   createdAt: string;
 }
 
 export interface TrendPoint {
   date: string;
-  steps: number;
-  sleepHours: number;
+  steps: number | null;
+  sleepHours: number | null;
   medicationOnTimeRate: number;
   riskLevel: RiskLevel;
 }

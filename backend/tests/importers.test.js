@@ -26,6 +26,44 @@ test("CSV importer parses daily snapshot rows", () => {
   assert.equal(rows[0].steps, 980);
 });
 
+test("CSV importer keeps missing wearable metrics as null", () => {
+  const csv = [
+    "elder_id,date,data_source,heart_rate_avg,resting_heart_rate,steps,active_minutes,sleep_duration,wear_time_hours,data_quality",
+    "E001,2026-06-20,CSV,84,,980,,,18.2,85",
+  ].join("\n");
+
+  const [row] = parseDailySnapshotsCsv(csv);
+
+  assert.equal(row.resting_heart_rate, null);
+  assert.equal(row.active_minutes, null);
+  assert.equal(row.sleep_duration, null);
+  assert.equal(row.data_quality, 85);
+});
+
+test("CSV importer can apply server-controlled elder and source metadata", () => {
+  const csv = [
+    "elder_id,date,data_source,heart_rate_avg,resting_heart_rate,steps,active_minutes,sleep_duration,wear_time_hours,data_quality",
+    "WRONG,2026-06-20,Untrusted Source,84,70,980,20,6.2,18.2,85",
+  ].join("\n");
+
+  const [row] = parseDailySnapshotsCsv(csv, {
+    elderId: "E001",
+    dataSource: "CSV Import",
+  });
+
+  assert.equal(row.elder_id, "E001");
+  assert.equal(row.data_source, "CSV Import");
+});
+
+test("CSV importer rejects a blank data_quality instead of coercing it to zero", () => {
+  const csv = [
+    "elder_id,date,data_source,heart_rate_avg,resting_heart_rate,steps,active_minutes,sleep_duration,wear_time_hours,data_quality",
+    "E001,2026-06-20,CSV,84,70,980,20,6.2,18.2,",
+  ].join("\n");
+
+  assert.throws(() => parseDailySnapshotsCsv(csv), /CSV/);
+});
+
 test("Apple Health timestamp parsing is deterministic for +0800 values", () => {
   const value = "2026-06-18 20:15:00 +0800";
   const parsed = parseAppleHealthTimestamp(value);

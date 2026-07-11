@@ -1,4 +1,5 @@
 import { FamilyPeaceCard } from "../components/FamilyPeaceCard";
+import { AgentSourceBadge } from "../components/AgentSourceBadge";
 import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { MockNoticeBanner } from "../components/MockNoticeBanner";
 import { UnknownElderState } from "../components/UnknownElderState";
@@ -7,6 +8,7 @@ import { getElderViewModel } from "../lib/elderView";
 import { buildFamilyStatusMessage } from "../lib/familyCopy";
 import {
   getActiveTaskForElder,
+  getAgentSummariesForElder,
   getEventsForElder,
   getRiskForElder,
   useDemo,
@@ -27,6 +29,7 @@ export const FamilyPage = ({ elderId }: FamilyPageProps) => {
   const events = getEventsForElder(state, profile.elderId);
   const careLoopStatus = deriveCareLoopStatus(profile.elderId, state.tasks, events);
   const displayStatus = deriveDisplayStatus(risk, careLoopStatus);
+  const agentSummaries = getAgentSummariesForElder(state, profile.elderId);
   const exceptionText = buildFamilyStatusMessage(
     profile,
     risk,
@@ -61,9 +64,10 @@ export const FamilyPage = ({ elderId }: FamilyPageProps) => {
           <span>温和说明</span>
           <h2>家属可见摘要</h2>
         </div>
-        <p>
-          系统会把复杂的步数、睡眠、用药和事件判断转成照护状态，不展示复杂医学指标。
-          如有持续不适或紧急情况，将由照护人员或专业医疗人员判断处理。
+        <p>{agentSummaries.familySummary}</p>
+        <AgentSourceBadge summaries={agentSummaries} />
+        <p className="muted-copy">
+          系统只展示照护摘要，不展示精确位置；如有持续不适或紧急情况，由照护人员按机构流程处理。
         </p>
         <div className="button-row page-link-row">
           <a className="text-button" href={`#/medication/${profile.elderId}`}>

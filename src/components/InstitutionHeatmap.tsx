@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import type { CareLoopStatus, DisplayStatus } from "../lib/displayStatus";
 import { displayToneToPillTone } from "../lib/displayStatus";
+import { ratioDataQualityToPercent } from "../lib/dataQuality";
 import {
   careLoopLabels,
   dimensionLabels,
@@ -94,7 +95,9 @@ export const InstitutionHeatmap = ({ rows }: InstitutionHeatmapProps) => (
             </td>
             <td>
               <strong>{snapshot?.dataSource ?? "本地 Mock"}</strong>
-              <span>质量 {Math.round(snapshot?.dataQuality ?? risk.dataCompleteness * 100)}%</span>
+              <span>
+                质量 {ratioDataQualityToPercent(snapshot?.dataQuality ?? risk.dataCompleteness)}%
+              </span>
             </td>
             <DimensionCell
               label={dimensionLabels[risk.dimensions.vitals]}

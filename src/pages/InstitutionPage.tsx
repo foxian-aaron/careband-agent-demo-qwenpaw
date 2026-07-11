@@ -1,13 +1,16 @@
 import { useMemo, useState } from "react";
 import { InstitutionHeatmap, type HeatmapRow } from "../components/InstitutionHeatmap";
+import { AgentSourceBadge } from "../components/AgentSourceBadge";
 import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { RiskBadge } from "../components/RiskBadge";
 import {
   deriveInstitutionMetrics,
+  isSameCareDay,
   type InstitutionElderRowInput,
 } from "../lib/institutionMetrics";
 import {
   getActiveTaskForElder,
+  getAgentSummariesForElder,
   getEventsForElder,
   getRiskForElder,
   getTaskForElder,
@@ -87,7 +90,8 @@ export const InstitutionPage = () => {
     (row) =>
       (filter === "all" || row.risk.riskLevel === filter) && matchesTreatment(row),
   );
-  const metricsInput: InstitutionElderRowInput[] = rows.map((row) => ({
+  const operationalRows = rows.filter((row) => row.profile.subjectKind !== "team_test");
+  const metricsInput: InstitutionElderRowInput[] = operationalRows.map((row) => ({
     elderId: row.profile.elderId,
     riskLevel: row.risk.riskLevel,
     riskScore: row.risk.riskScore,
@@ -96,25 +100,40 @@ export const InstitutionPage = () => {
     careLoopStatus: row.careLoopStatus,
     taskStatus: row.task?.status,
     dataCompleteness: row.risk.dataCompleteness,
+    isTeamTest: row.profile.subjectKind === "team_test",
+    hadHighRiskToday:
+      ["high_risk", "urgent"].includes(row.risk.riskLevel) ||
+      state.tasks.some(
+        (task) =>
+          task.elderId === row.profile.elderId &&
+          ["high", "urgent"].includes(task.priority) &&
+          isSameCareDay(task.createdAt),
+      ),
   }));
   const metrics = deriveInstitutionMetrics(metricsInput);
-  const attentionCount = rows.filter((row) => row.risk.riskLevel === "attention").length;
-  const stableCount = rows.filter((row) => row.risk.riskLevel === "stable").length;
-  const medicationUnconfirmed = Object.values(state.snapshots).filter(
-    (snapshot) => snapshot.medicationEvening === "not_confirmed",
+  const attentionCount = operationalRows.filter(
+    (row) => row.risk.riskLevel === "attention",
   ).length;
-  const activityDrop = rows.filter(
+  const stableCount = operationalRows.filter((row) => row.risk.riskLevel === "stable").length;
+  const medicationUnconfirmed = Object.values(state.snapshots).filter(
+    (snapshot) =>
+      state.profiles[snapshot.elderId]?.subjectKind !== "team_test" &&
+      snapshot.medicationEvening === "not_confirmed",
+  ).length;
+  const activityDrop = operationalRows.filter(
     (row) => row.risk.dimensions.activity === "significantly_low",
   ).length;
-  const sleepLow = rows.filter((row) => row.risk.dimensions.sleep === "below_baseline").length;
-  const dataInsufficient = rows.filter(
+  const sleepLow = operationalRows.filter(
+    (row) => row.risk.dimensions.sleep === "below_baseline",
+  ).length;
+  const dataInsufficient = operationalRows.filter(
     (row) => row.risk.riskLevel === "data_insufficient",
   ).length;
-  const memoryEstablishedCount = rows.filter((row) => row.memoryEstablished).length;
-  const deviceOfflineCount = rows.filter(
+  const memoryEstablishedCount = operationalRows.filter((row) => row.memoryEstablished).length;
+  const deviceOfflineCount = operationalRows.filter(
     (row) => row.deviceRecord?.connectionStatus === "offline",
   ).length;
-  const institutionSummary = `今天曾有 ${metrics.todayEverHighRiskCount} 位长者触发高风险或紧急状态，其中 ${metrics.currentOpenHighRiskCount} 位仍未闭环，${metrics.followedUpHighRiskCount} 位已完成跟进。当前还有 ${metrics.pendingTaskCount} 个任务尚未接单。建议机构优先确认未闭环高风险个案，同时复盘已跟进个案的处理记录。`;
+  const chenAgentSummaries = getAgentSummariesForElder(state, "E001");
 
   return (
     <div className="page">
@@ -210,12 +229,13 @@ export const InstitutionPage = () => {
         </article>
         <article className="panel ai-summary-card">
           <div className="section-title">
-            <span>Mock AI 机构摘要</span>
-            <h2>今日管理建议</h2>
+            <span>陈伯 E001 · 机构摘要</span>
+            <h2>同一次 Agent 运行的管理视角</h2>
           </div>
-          <p>{institutionSummary}</p>
+          <p>{chenAgentSummaries.institutionSummary}</p>
+          <AgentSourceBadge summaries={chenAgentSummaries} />
           <div className="risk-strip">
-            {rows.slice(0, 3).map((row) => (
+            {operationalRows.slice(0, 3).map((row) => (
               <div key={row.profile.elderId}>
                 <strong>{row.profile.name}</strong>
                 <RiskBadge level={row.risk.riskLevel} />

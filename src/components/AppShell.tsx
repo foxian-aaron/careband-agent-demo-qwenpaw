@@ -62,6 +62,7 @@ export const AppShell = ({ children, currentPath }: AppShellProps) => {
         >
           <strong>{runtime.previewText}</strong>
           <span>{runtime.backendText}</span>
+          {state.backend.error ? <span role="alert">{state.backend.error}</span> : null}
         </div>
         {children}
       </main>

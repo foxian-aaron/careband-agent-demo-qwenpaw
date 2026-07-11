@@ -177,6 +177,7 @@ button.primary,
 .page {
   display: grid;
   gap: 22px;
+  grid-template-columns: minmax(0, 1fr);
   max-width: 1360px;
   margin: 0 auto;
 }
@@ -321,7 +322,7 @@ button.primary,
 
 .heatmap-table {
   border-collapse: collapse;
-  min-width: 980px;
+  min-width: 1480px;
   width: 100%;
 }
 
@@ -331,6 +332,7 @@ button.primary,
   font-size: 0.86rem;
   font-weight: 700;
   text-align: left;
+  white-space: nowrap;
 }
 
 .heatmap-table th,
@@ -885,6 +887,17 @@ button.primary,
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-io-grid > * {
+  min-width: 0;
+}
+
+.agent-io-grid pre {
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .trace-output-grid div {

@@ -33,7 +33,7 @@ export const HardwareSimulator = ({ elderId }: HardwareSimulatorProps) => {
         <span>硬件原型模拟</span>
         <h2>虚拟手环事件如何触发照护闭环</h2>
       </div>
-      <MockNoticeBanner>当前不接真实硬件；所有事件均由前端生成 CareEvent，后续可替换为 ESP32 / nRF 原型机上报。</MockNoticeBanner>
+      <MockNoticeBanner>当前按钮是软件模拟器，但会真实 POST 到与 ESP32 相同的 /api/events 契约；断线时才使用本地语义一致的 fallback。</MockNoticeBanner>
       <div className="hardware-grid">
         <VirtualCareBand device={device} />
         <DeviceStatusCard device={device} compact />
@@ -57,7 +57,7 @@ export const HardwareSimulator = ({ elderId }: HardwareSimulatorProps) => {
       </div>
       <div className="mock-flow-note">
         <strong>事件触发后展示</strong>
-        <p>事件已生成；未来 API：POST /api/events；当前处理方式：前端 Mock；影响页面：机构端、护工端、家属端、老人驾驶舱。</p>
+        <p>在线链路：POST /api/events → 规则引擎 → Agent → 三端刷新；离线时保留本地 Mock fallback。</p>
         {latestLog ? <small>最近 Mock 调用：{latestLog.method} {latestLog.endpoint}</small> : null}
       </div>
     </section>

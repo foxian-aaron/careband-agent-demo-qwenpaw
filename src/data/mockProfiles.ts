@@ -16,6 +16,7 @@ export const mockProfiles: ElderProfile[] = [
     ],
     caregiverId: "CG-A",
     familyContactId: "FAM-TEST001",
+    subjectKind: "team_test",
   },
   {
     elderId: "E001",

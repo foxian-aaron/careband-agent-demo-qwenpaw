@@ -4,6 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { SAFETY_DISCLAIMER } from "./constants.js";
+import { normalizeEventInput } from "./validators.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +13,7 @@ const backendRoot = path.resolve(__dirname, "..");
 const resolveDatabasePath = () => {
   const configured = process.env.DATABASE_PATH;
   if (!configured) return path.join(backendRoot, "data", "careband.sqlite");
+  if (configured === ":memory:") return configured;
   return path.isAbsolute(configured)
     ? configured
     : path.resolve(backendRoot, configured);
@@ -81,7 +83,7 @@ export function getDb() {
   if (connection) return connection;
 
   const dbPath = resolveDatabasePath();
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  if (dbPath !== ":memory:") fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   connection = new Database(dbPath);
   connection.pragma("journal_mode = WAL");
@@ -89,14 +91,106 @@ export function getDb() {
 
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   connection.exec(schema);
+  runMigrations(connection);
   seedDemoData(connection);
+  normalizeStoredData(connection);
 
   return connection;
 }
 
+const tableColumns = (db, tableName) =>
+  new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((column) => column.name));
+
+const ensureColumn = (db, tableName, columnName, definition) => {
+  if (tableColumns(db, tableName).has(columnName)) return;
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+};
+
+function runMigrations(db) {
+  const migrate = db.transaction(() => {
+    ensureColumn(db, "elders", "subject_kind", "TEXT NOT NULL DEFAULT 'elder'");
+    ensureColumn(db, "events", "received_at", "TEXT");
+    ensureColumn(db, "events", "severity_hint", "TEXT NOT NULL DEFAULT 'info'");
+    ensureColumn(db, "events", "data_quality", "TEXT NOT NULL DEFAULT 'medium'");
+    ensureColumn(db, "events", "status", "TEXT NOT NULL DEFAULT 'open'");
+    ensureColumn(db, "events", "resolved_at", "TEXT");
+    ensureColumn(db, "events", "resolved_by", "TEXT");
+    ensureColumn(db, "events", "linked_task_id", "TEXT");
+    ensureColumn(db, "tasks", "updated_at", "TEXT");
+
+    db.prepare(
+      `DELETE FROM snapshots
+       WHERE rowid NOT IN (
+         SELECT MAX(rowid) FROM snapshots GROUP BY elder_id, date
+       )`,
+    ).run();
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_elder_date_unique ON snapshots (elder_id, date)",
+    );
+
+    db.prepare("UPDATE elders SET subject_kind = 'team_test' WHERE elder_id = 'TEST001'").run();
+    db.prepare("UPDATE tasks SET status = 'open' WHERE status = 'pending'").run();
+    db.prepare("UPDATE tasks SET status = 'resolved' WHERE status = 'completed'").run();
+    db.prepare(
+      "UPDATE tasks SET updated_at = COALESCE(updated_at, completed_at, created_at)",
+    ).run();
+    db.prepare("UPDATE agent_outputs SET status_level = 'observation' WHERE status_level = 'observe'").run();
+    db.prepare(
+      "UPDATE agent_outputs SET status_level = 'data_insufficient' WHERE status_level = 'insufficient_data'",
+    ).run();
+
+    db.prepare(
+      `INSERT OR IGNORE INTO schema_migrations (migration_id, applied_at)
+       VALUES (?, ?)`,
+    ).run("2026-07-11-core-contract-v1", nowIso());
+  });
+
+  migrate();
+}
+
+function normalizeStoredData(db) {
+  const rows = db.prepare("SELECT * FROM events").all();
+  const update = db.prepare(
+    `UPDATE events
+     SET event_type = @event_type,
+         source = @source,
+         payload = @payload,
+         received_at = @received_at,
+         severity_hint = @severity_hint,
+         data_quality = @data_quality,
+         status = @status
+     WHERE event_id = @event_id`,
+  );
+
+  const normalize = db.transaction(() => {
+    for (const row of rows) {
+      const event = normalizeEventInput({
+        ...row,
+        occurred_at: row.timestamp,
+        payload: parseJson(row.payload, {}),
+      });
+      update.run({
+        event_id: row.event_id,
+        event_type: event.event_type,
+        source: event.source,
+        payload: stringifyJson(event.payload),
+        received_at: row.received_at || row.created_at || row.timestamp,
+        severity_hint: row.severity_hint === "info" ? event.severity_hint : row.severity_hint,
+        data_quality: row.data_quality || event.data_quality,
+        status: row.status || "open",
+      });
+    }
+  });
+
+  normalize();
+  db.prepare("UPDATE elders SET subject_kind = 'team_test' WHERE elder_id = 'TEST001'").run();
+}
+
 function seedDemoData(db) {
-  const count = db.prepare("SELECT COUNT(*) AS count FROM elders").get().count;
-  if (count > 0) {
+  const demoCount = db
+    .prepare("SELECT COUNT(*) AS count FROM elders WHERE elder_id IN ('E001', 'E002', 'E003', 'E004')")
+    .get().count;
+  if (demoCount === 4) {
     ensureTestElder(db);
     return;
   }
@@ -361,17 +455,21 @@ function seedDemoData(db) {
 
 function ensureTestElder(db) {
   const exists = db.prepare("SELECT elder_id FROM elders WHERE elder_id = ?").get("TEST001");
-  if (exists) return;
+  if (exists) {
+    db.prepare("UPDATE elders SET subject_kind = 'team_test' WHERE elder_id = 'TEST001'").run();
+    return;
+  }
 
   db.prepare(
-    `INSERT INTO elders (elder_id, name, age, room, risk_tags, created_at)
-     VALUES (@elder_id, @name, @age, @room, @risk_tags, @created_at)`,
+    `INSERT INTO elders (elder_id, name, age, room, risk_tags, subject_kind, created_at)
+     VALUES (@elder_id, @name, @age, @room, @risk_tags, @subject_kind, @created_at)`,
   ).run({
     elder_id: "TEST001",
     name: "團隊測試資料",
     age: 30,
     room: "TEST",
     risk_tags: stringifyJson(["團隊成員 Apple Watch 測試資料", "非真實長者資料"]),
+    subject_kind: "team_test",
     created_at: nowIso(),
   });
 }
@@ -384,16 +482,30 @@ const averageField = (rows, field, fallback) => {
   return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1));
 };
 
-function getAppleTestBaseline(elderId) {
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM snapshots
-       WHERE elder_id = ? AND data_quality >= 40
-       ORDER BY date DESC, created_at DESC
-       LIMIT 7`,
-    )
-    .all(elderId);
-  const fallback = DEMO_BASELINES.TEST001;
+function getSnapshotBaseline(elderId, excludeDate) {
+  const db = getDb();
+  const latestDate =
+    excludeDate ??
+    db.prepare("SELECT date FROM snapshots WHERE elder_id = ? ORDER BY date DESC LIMIT 1").get(elderId)
+      ?.date;
+  const fallback = DEMO_BASELINES[elderId] ?? {
+    elder_id: elderId,
+    avg_steps_7d: 1800,
+    avg_sleep_7d: 6.5,
+    avg_active_minutes_7d: 40,
+    resting_hr_baseline: 72,
+    baseline_confidence: 70,
+  };
+  const rows = latestDate
+    ? db
+        .prepare(
+          `SELECT * FROM snapshots
+           WHERE elder_id = ? AND data_quality >= 40 AND date < ?
+           ORDER BY date DESC, created_at DESC
+           LIMIT 7`,
+        )
+        .all(elderId, latestDate)
+    : [];
   const enoughDays = rows.length >= 3;
 
   return {
@@ -402,22 +514,17 @@ function getAppleTestBaseline(elderId) {
     avg_sleep_7d: averageField(rows, "sleep_duration", fallback.avg_sleep_7d),
     avg_active_minutes_7d: averageField(rows, "active_minutes", fallback.avg_active_minutes_7d),
     resting_hr_baseline: averageField(rows, "resting_heart_rate", fallback.resting_hr_baseline),
-    baseline_confidence: enoughDays ? Math.min(95, 50 + rows.length * 6) : Math.max(20, rows.length * 12),
-    baseline_label: enoughDays ? "7日基線" : "基線建立中",
+    baseline_confidence: enoughDays
+      ? Math.min(95, 50 + rows.length * 6)
+      : fallback.baseline_confidence,
+    baseline_label: enoughDays ? "7日基線" : fallback.baseline_label ?? "演示基線",
     usable_days: rows.length,
+    excludes_date: latestDate ?? null,
   };
 }
 
-export function getBaseline(elderId) {
-  if (elderId === "TEST001") return getAppleTestBaseline(elderId);
-  return DEMO_BASELINES[elderId] ?? {
-    elder_id: elderId,
-    avg_steps_7d: 1800,
-    avg_sleep_7d: 6.5,
-    avg_active_minutes_7d: 40,
-    resting_hr_baseline: 72,
-    baseline_confidence: 70,
-  };
+export function getBaseline(elderId, excludeDate) {
+  return getSnapshotBaseline(elderId, excludeDate);
 }
 
 export function mapElder(row) {
@@ -436,6 +543,8 @@ export function mapEvent(row) {
   if (!row) return null;
   return {
     ...row,
+    occurred_at: row.timestamp,
+    received_at: row.received_at ?? row.created_at,
     payload: parseJson(row.payload, {}),
   };
 }
@@ -449,6 +558,24 @@ export function mapAgentOutput(row) {
   return {
     ...row,
     key_reasons: parseJson(row.key_reasons, []),
+  };
+}
+
+export function mapImportRun(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    quality_summary: parseJson(row.quality_summary, {}),
+    warnings: parseJson(row.warnings, []),
+  };
+}
+
+export function mapAgentRun(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    fallback_used: Boolean(row.fallback_used),
+    input_summary: parseJson(row.input_summary, {}),
   };
 }
 
@@ -476,6 +603,19 @@ export function getLatestSnapshot(elderId) {
   );
 }
 
+export function getRecentSnapshots(elderId, limit = 7) {
+  const safeLimit = Math.max(1, Math.min(31, Number(limit) || 7));
+  return getDb()
+    .prepare(
+      `SELECT * FROM snapshots
+       WHERE elder_id = ?
+       ORDER BY date DESC, created_at DESC
+       LIMIT ?`,
+    )
+    .all(elderId, safeLimit)
+    .map(mapSnapshot);
+}
+
 export function getEventsForElder(elderId) {
   return getDb()
     .prepare("SELECT * FROM events WHERE elder_id = ? ORDER BY timestamp ASC")
@@ -483,11 +623,28 @@ export function getEventsForElder(elderId) {
     .map(mapEvent);
 }
 
+export function getActiveEventsForElder(elderId, { windowHours = 24, now = Date.now() } = {}) {
+  const windowStart = now - Math.max(1, Number(windowHours) || 24) * 60 * 60 * 1000;
+  const futureTolerance = now + 5 * 60 * 1000;
+  return getDb()
+    .prepare(
+      `SELECT * FROM events
+       WHERE elder_id = ? AND status = 'open'
+       ORDER BY timestamp ASC`,
+    )
+    .all(elderId)
+    .map(mapEvent)
+    .filter((event) => {
+      const occurredAt = Date.parse(event.occurred_at);
+      return Number.isFinite(occurredAt) && occurredAt >= windowStart && occurredAt <= futureTolerance;
+    });
+}
+
 export function getOpenTasksForElder(elderId) {
   return getDb()
     .prepare(
       `SELECT * FROM tasks
-       WHERE elder_id = ? AND status != 'completed'
+       WHERE elder_id = ? AND status NOT IN ('resolved', 'cancelled')
        ORDER BY created_at DESC`,
     )
     .all(elderId)
@@ -514,6 +671,19 @@ export function getLatestAgentOutput(elderId) {
   );
 }
 
+export function getLatestAgentRun(elderId) {
+  return mapAgentRun(
+    getDb()
+      .prepare(
+        `SELECT * FROM agent_runs
+         WHERE elder_id = ?
+         ORDER BY created_at DESC
+         LIMIT 1`,
+      )
+      .get(elderId),
+  );
+}
+
 export function insertSnapshot(snapshot) {
   const db = getDb();
   const record = {
@@ -523,7 +693,7 @@ export function insertSnapshot(snapshot) {
   };
 
   db.prepare(
-    `INSERT OR REPLACE INTO snapshots (
+    `INSERT INTO snapshots (
       snapshot_id, elder_id, date, data_source, heart_rate_avg,
       resting_heart_rate, steps, active_minutes, sleep_duration,
       wear_time_hours, data_quality, created_at
@@ -531,34 +701,212 @@ export function insertSnapshot(snapshot) {
       @snapshot_id, @elder_id, @date, @data_source, @heart_rate_avg,
       @resting_heart_rate, @steps, @active_minutes, @sleep_duration,
       @wear_time_hours, @data_quality, @created_at
-    )`,
+    )
+    ON CONFLICT(elder_id, date) DO UPDATE SET
+      data_source = excluded.data_source,
+      heart_rate_avg = excluded.heart_rate_avg,
+      resting_heart_rate = excluded.resting_heart_rate,
+      steps = excluded.steps,
+      active_minutes = excluded.active_minutes,
+      sleep_duration = excluded.sleep_duration,
+      wear_time_hours = excluded.wear_time_hours,
+      data_quality = excluded.data_quality,
+      created_at = excluded.created_at`,
   ).run(record);
 
   return mapSnapshot(
-    db.prepare("SELECT * FROM snapshots WHERE snapshot_id = ?").get(record.snapshot_id),
+    db.prepare("SELECT * FROM snapshots WHERE elder_id = ? AND date = ?").get(record.elder_id, record.date),
   );
 }
 
 export function insertEvent(event) {
   const db = getDb();
+  const occurredAt = event.occurred_at ?? event.timestamp ?? nowIso();
+  const receivedAt = event.received_at ?? nowIso();
   const record = {
-    ...event,
     event_id: event.event_id ?? randomUUID(),
-    timestamp: event.timestamp ?? nowIso(),
-    created_at: event.created_at ?? nowIso(),
+    elder_id: event.elder_id,
+    event_type: event.event_type,
+    timestamp: occurredAt,
+    source: event.source,
     raw_text: event.raw_text ?? null,
     payload: stringifyJson(event.payload ?? {}),
+    received_at: receivedAt,
+    severity_hint: event.severity_hint ?? "info",
+    data_quality: event.data_quality ?? "medium",
+    status: "open",
+    resolved_at: null,
+    resolved_by: null,
+    linked_task_id: null,
+    created_at: event.created_at ?? nowIso(),
   };
 
-  db.prepare(
-    `INSERT OR REPLACE INTO events (
-      event_id, elder_id, event_type, timestamp, source, raw_text, payload, created_at
+  const result = db.prepare(
+    `INSERT OR IGNORE INTO events (
+      event_id, elder_id, event_type, timestamp, source, raw_text, payload,
+      received_at, severity_hint, data_quality, status, resolved_at, resolved_by,
+      linked_task_id, created_at
     ) VALUES (
-      @event_id, @elder_id, @event_type, @timestamp, @source, @raw_text, @payload, @created_at
+      @event_id, @elder_id, @event_type, @timestamp, @source, @raw_text, @payload,
+      @received_at, @severity_hint, @data_quality, @status, @resolved_at, @resolved_by,
+      @linked_task_id, @created_at
     )`,
   ).run(record);
 
-  return mapEvent(db.prepare("SELECT * FROM events WHERE event_id = ?").get(record.event_id));
+  if (result.changes > 0) {
+    insertAuditLog({
+      elder_id: record.elder_id,
+      action: "event.accepted",
+      actor: record.source,
+      target_type: "event",
+      target_id: record.event_id,
+      metadata: {
+        event_type: record.event_type,
+        severity_hint: record.severity_hint,
+      },
+    });
+  }
+
+  return {
+    event: mapEvent(db.prepare("SELECT * FROM events WHERE event_id = ?").get(record.event_id)),
+    inserted: result.changes > 0,
+  };
+}
+
+export function insertAuditLog({ elder_id = null, action, actor, target_type, target_id = null, metadata = {} }) {
+  const db = getDb();
+  const record = {
+    audit_id: randomUUID(),
+    elder_id,
+    action,
+    actor,
+    target_type,
+    target_id,
+    metadata: stringifyJson(metadata),
+    created_at: nowIso(),
+  };
+  db.prepare(
+    `INSERT INTO audit_logs (
+       audit_id, elder_id, action, actor, target_type, target_id, metadata, created_at
+     ) VALUES (
+       @audit_id, @elder_id, @action, @actor, @target_type, @target_id, @metadata, @created_at
+     )`,
+  ).run(record);
+  return { ...record, metadata };
+}
+
+export function insertImportRun(run) {
+  const db = getDb();
+  const record = {
+    import_id: run.import_id ?? randomUUID(),
+    elder_id: run.elder_id,
+    source_type: run.source_type,
+    file_name: run.file_name ?? null,
+    status: run.status ?? "confirmed",
+    snapshot_count: run.snapshot_count ?? 0,
+    date_start: run.date_start ?? null,
+    date_end: run.date_end ?? null,
+    quality_summary: stringifyJson(run.quality_summary ?? {}),
+    warnings: stringifyJson(run.warnings ?? []),
+    created_at: run.created_at ?? nowIso(),
+  };
+
+  db.prepare(
+    `INSERT INTO import_runs (
+       import_id, elder_id, source_type, file_name, status, snapshot_count,
+       date_start, date_end, quality_summary, warnings, created_at
+     ) VALUES (
+       @import_id, @elder_id, @source_type, @file_name, @status, @snapshot_count,
+       @date_start, @date_end, @quality_summary, @warnings, @created_at
+     )`,
+  ).run(record);
+
+  insertAuditLog({
+    elder_id: record.elder_id,
+    action: "wearable.import.confirmed",
+    actor: "dashboard",
+    target_type: "import_run",
+    target_id: record.import_id,
+    metadata: {
+      source_type: record.source_type,
+      snapshot_count: record.snapshot_count,
+      date_start: record.date_start,
+      date_end: record.date_end,
+    },
+  });
+
+  return mapImportRun(
+    db.prepare("SELECT * FROM import_runs WHERE import_id = ?").get(record.import_id),
+  );
+}
+
+export function insertAgentRun(run) {
+  const db = getDb();
+  const record = {
+    run_id: run.run_id ?? randomUUID(),
+    elder_id: run.elder_id,
+    source_event_id: run.source_event_id ?? null,
+    provider: run.provider,
+    model: run.model ?? null,
+    started_at: run.started_at ?? nowIso(),
+    duration_ms: run.duration_ms ?? null,
+    validation_status: run.validation_status,
+    fallback_used: run.fallback_used ? 1 : 0,
+    error_reason: run.error_reason ?? null,
+    input_summary: stringifyJson(run.input_summary ?? {}),
+    raw_response_excerpt:
+      typeof run.raw_response_excerpt === "string"
+        ? run.raw_response_excerpt.slice(0, 8000)
+        : null,
+    created_at: run.created_at ?? nowIso(),
+  };
+
+  db.prepare(
+    `INSERT INTO agent_runs (
+       run_id, elder_id, source_event_id, provider, model, started_at,
+       duration_ms, validation_status, fallback_used, error_reason,
+       input_summary, raw_response_excerpt, created_at
+     ) VALUES (
+       @run_id, @elder_id, @source_event_id, @provider, @model, @started_at,
+       @duration_ms, @validation_status, @fallback_used, @error_reason,
+       @input_summary, @raw_response_excerpt, @created_at
+     )`,
+  ).run(record);
+
+  insertAuditLog({
+    elder_id: record.elder_id,
+    action:
+      record.validation_status === "failed"
+        ? "agent.failed"
+        : record.fallback_used
+          ? "agent.fallback"
+          : "agent.completed",
+    actor: record.provider,
+    target_type: "agent_run",
+    target_id: record.run_id,
+    metadata: {
+      validation_status: record.validation_status,
+      fallback_used: Boolean(record.fallback_used),
+      duration_ms: record.duration_ms,
+    },
+  });
+
+  return mapAgentRun(
+    db.prepare("SELECT * FROM agent_runs WHERE run_id = ?").get(record.run_id),
+  );
+}
+
+export function listImportRuns(elderId, limit = 20) {
+  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+  return getDb()
+    .prepare(
+      `SELECT * FROM import_runs
+       WHERE elder_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`,
+    )
+    .all(elderId, safeLimit)
+    .map(mapImportRun);
 }
 
 export function createTaskForRisk({ elder, event, riskResult }) {
@@ -569,13 +917,19 @@ export function createTaskForRisk({ elder, event, riskResult }) {
   const existing = db
     .prepare(
       `SELECT * FROM tasks
-       WHERE elder_id = ? AND status != 'completed'
+       WHERE elder_id = ? AND status NOT IN ('resolved', 'cancelled')
        ORDER BY created_at DESC
        LIMIT 1`,
     )
     .get(elder.elder_id);
 
   if (existing) {
+    if (event?.event_id) {
+      db.prepare("UPDATE events SET linked_task_id = ? WHERE event_id = ?").run(
+        existing.task_id,
+        event.event_id,
+      );
+    }
     const nextPriority =
       riskResult.status_level === "urgent"
         ? "urgent"
@@ -596,7 +950,7 @@ export function createTaskForRisk({ elder, event, riskResult }) {
       db.prepare(
         `UPDATE tasks
          SET source_event_id = ?, priority = ?, task_title = ?, task_reason = ?,
-             recommended_action = ?
+             recommended_action = ?, updated_at = ?
          WHERE task_id = ?`,
       ).run(
         event?.event_id ?? existing.source_event_id,
@@ -604,6 +958,7 @@ export function createTaskForRisk({ elder, event, riskResult }) {
         nextTitle,
         nextReason,
         riskResult.recommended_action,
+        nowIso(),
         existing.task_id,
       );
       return mapTask(db.prepare("SELECT * FROM tasks WHERE task_id = ?").get(existing.task_id));
@@ -611,6 +966,13 @@ export function createTaskForRisk({ elder, event, riskResult }) {
 
     return mapTask(existing);
   }
+
+  const lifecycleOnlyAction =
+    event?.event_type === "manual_note" &&
+    ["caregiver_accepted", "caregiver_checked", "caregiver_completed"].includes(
+      event.payload?.action,
+    );
+  if (lifecycleOnlyAction) return null;
 
   const priority =
     riskResult.status_level === "urgent"
@@ -633,22 +995,30 @@ export function createTaskForRisk({ elder, event, riskResult }) {
     task_title: title,
     task_reason: riskResult.key_reasons.join("；") || "规则引擎提示需要关注",
     recommended_action: riskResult.recommended_action,
-    status: "pending",
+    status: "open",
     handled_by: null,
     handled_note: null,
     created_at: nowIso(),
+    updated_at: nowIso(),
     completed_at: null,
   };
 
   db.prepare(
     `INSERT INTO tasks (
       task_id, elder_id, source_event_id, priority, task_title, task_reason,
-      recommended_action, status, handled_by, handled_note, created_at, completed_at
+      recommended_action, status, handled_by, handled_note, created_at, updated_at, completed_at
     ) VALUES (
       @task_id, @elder_id, @source_event_id, @priority, @task_title, @task_reason,
-      @recommended_action, @status, @handled_by, @handled_note, @created_at, @completed_at
+      @recommended_action, @status, @handled_by, @handled_note, @created_at, @updated_at, @completed_at
     )`,
   ).run(record);
+
+  if (event?.event_id) {
+    db.prepare("UPDATE events SET linked_task_id = ? WHERE event_id = ?").run(
+      record.task_id,
+      event.event_id,
+    );
+  }
 
   return mapTask(db.prepare("SELECT * FROM tasks WHERE task_id = ?").get(record.task_id));
 }
@@ -658,24 +1028,62 @@ export function updateTask(taskId, changes) {
   const current = db.prepare("SELECT * FROM tasks WHERE task_id = ?").get(taskId);
   if (!current) return null;
 
+  const nextStatus = changes.status ?? current.status;
+  if (["resolved", "cancelled"].includes(current.status) && nextStatus !== current.status) {
+    const error = new Error(`Task ${taskId} is already ${current.status} and cannot be reopened.`);
+    error.statusCode = 409;
+    throw error;
+  }
+  if (nextStatus === "cancelled" && current.priority === "urgent") {
+    const error = new Error("Urgent caregiver tasks cannot be cancelled; resolve them with a handling record.");
+    error.statusCode = 409;
+    throw error;
+  }
+
   const next = {
     task_id: taskId,
-    status: changes.status ?? current.status,
+    status: nextStatus,
     handled_by: changes.handled_by ?? current.handled_by,
     handled_note: changes.handled_note ?? current.handled_note,
+    updated_at: nowIso(),
     completed_at:
       changes.completed_at ??
-      (changes.status === "completed" && !current.completed_at ? nowIso() : current.completed_at),
+      (["resolved", "cancelled"].includes(changes.status) && !current.completed_at
+        ? nowIso()
+        : current.completed_at),
   };
 
   db.prepare(
     `UPDATE tasks
      SET status = @status,
-         handled_by = @handled_by,
-         handled_note = @handled_note,
-         completed_at = @completed_at
+          handled_by = @handled_by,
+          handled_note = @handled_note,
+          updated_at = @updated_at,
+          completed_at = @completed_at
      WHERE task_id = @task_id`,
   ).run(next);
+
+  if (["resolved", "cancelled"].includes(next.status)) {
+    db.prepare(
+      `UPDATE events
+       SET status = 'resolved', resolved_at = ?, resolved_by = ?
+       WHERE linked_task_id = ? OR event_id = ?`,
+    ).run(
+      next.completed_at ?? next.updated_at,
+      next.handled_by ?? (next.status === "cancelled" ? "task_cancelled" : "caregiver"),
+      taskId,
+      current.source_event_id,
+    );
+  }
+
+  insertAuditLog({
+    elder_id: current.elder_id,
+    action: `task.${next.status}`,
+    actor: next.handled_by ?? "dashboard",
+    target_type: "task",
+    target_id: taskId,
+    metadata: { previous_status: current.status, status: next.status },
+  });
 
   return mapTask(db.prepare("SELECT * FROM tasks WHERE task_id = ?").get(taskId));
 }
@@ -713,12 +1121,23 @@ export function insertAgentOutput(output) {
 export function resetDemoData() {
   const db = getDb();
   const reset = db.transaction(() => {
-    db.prepare("DELETE FROM agent_outputs").run();
-    db.prepare("DELETE FROM tasks").run();
-    db.prepare("DELETE FROM events").run();
-    db.prepare("DELETE FROM snapshots").run();
-    db.prepare("DELETE FROM elders").run();
+    const demoIds = "'E001', 'E002', 'E003', 'E004'";
+    db.prepare(`DELETE FROM audit_logs WHERE elder_id IN (${demoIds})`).run();
+    db.prepare(`DELETE FROM agent_runs WHERE elder_id IN (${demoIds})`).run();
+    db.prepare(`DELETE FROM import_runs WHERE elder_id IN (${demoIds})`).run();
+    db.prepare(`DELETE FROM agent_outputs WHERE elder_id IN (${demoIds})`).run();
+    db.prepare(`DELETE FROM tasks WHERE elder_id IN (${demoIds})`).run();
+    db.prepare(`DELETE FROM events WHERE elder_id IN (${demoIds})`).run();
+    db.prepare(`DELETE FROM snapshots WHERE elder_id IN (${demoIds})`).run();
+    db.prepare(`DELETE FROM elders WHERE elder_id IN (${demoIds})`).run();
     seedDemoData(db);
+    normalizeStoredData(db);
+    insertAuditLog({
+      action: "demo.reset",
+      actor: "local_demo",
+      target_type: "demo",
+      metadata: { preserved_elder_ids: ["TEST001"] },
+    });
   });
 
   reset();

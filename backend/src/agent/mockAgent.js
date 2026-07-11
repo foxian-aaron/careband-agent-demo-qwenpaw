@@ -2,25 +2,27 @@ import { SAFETY_DISCLAIMER } from "../constants.js";
 
 const statusText = {
   stable: "状态稳定",
-  observe: "建议观察",
+  observation: "建议观察",
   attention: "需要关注",
   high_risk: "高风险",
   urgent: "紧急",
-  insufficient_data: "数据不足",
+  data_insufficient: "数据不足",
 };
 
-export function runMockAgent({ elder_profile, daily_snapshot, risk_result }) {
+export function runMockAgent({ elder_profile, daily_snapshot, risk_result }, options = {}) {
   const elderName = elder_profile?.name ?? elder_profile?.elder_name ?? "长者";
-  const level = risk_result?.status_level ?? "stable";
+  const level = risk_result?.status_level ?? "data_insufficient";
   const reasons = risk_result?.key_reasons ?? ["暂无明显异常"];
   const source = daily_snapshot?.data_source ?? "Demo Seed";
   const quality = daily_snapshot?.data_quality ?? 0;
+
+  const fallbackPrefix = options.fallbackLabel ? "Mock fallback：" : "";
 
   return {
     status_level: level,
     risk_score: Number(risk_result?.risk_score ?? 0),
     key_reasons: reasons,
-    caregiver_summary: `${elderName}当前为“${statusText[level] ?? level}”。数据来源：${source}，数据质量 ${quality}%。${reasons.join("；")} 请照护人员结合现场情况复核。`,
+    caregiver_summary: `${fallbackPrefix}${elderName}当前为“${statusText[level] ?? level}”。数据来源：${source}，数据质量 ${quality}%。${reasons.join("；")} 请照护人员结合现场情况复核。`,
     family_summary:
       level === "stable"
         ? `${elderName}今日状态整体平稳，照护团队会继续常规观察。`
@@ -29,6 +31,5 @@ export function runMockAgent({ elder_profile, daily_snapshot, risk_result }) {
     recommended_action:
       risk_result?.recommended_action ?? "保持常规照护与日常观察。",
     safety_disclaimer: SAFETY_DISCLAIMER,
-    agent_source: "mock",
   };
 }

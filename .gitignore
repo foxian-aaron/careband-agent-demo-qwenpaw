@@ -3,6 +3,8 @@ dist/
 .tools/
 coverage/
 output/
+logs/
+deliverables/browser-video/
 tsconfig.tsbuildinfo
 .vite-dev.*.log
 .vite-dev-*.log

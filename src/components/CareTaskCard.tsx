@@ -27,6 +27,7 @@ export const CareTaskCard = ({
 }: CareTaskCardProps) => {
   const isChen = profile.elderId === "E001";
   const isCompleted = task.status === "completed";
+  const isCancelled = task.status === "cancelled";
   const hasChecked = events.some(
     (event) =>
       event.eventType === "caregiver_checked" &&
@@ -51,9 +52,13 @@ export const CareTaskCard = ({
   };
   const agentSourceLabels = {
     mock: "Mock",
-    future_qwenpaw: "Future QwenPaw",
+    qwenpaw: "QwenPaw",
+    openai: "OpenAI",
     fallback_rule: "规则 fallback",
   };
+  const agentSourceLabel = task.agentSummarySource
+    ? agentSourceLabels[task.agentSummarySource]
+    : "未生成 / 未关联";
 
   return (
     <article className={`task-card priority-${task.priority}`}>
@@ -74,7 +79,7 @@ export const CareTaskCard = ({
           <dd>
             <div className="tag-row">
               <StatusPill label={sourceLabels[task.sourceType ?? "rule_engine"]} tone="observation" />
-              <StatusPill label={`Agent 摘要来源：${agentSourceLabels[task.agentSummarySource ?? "mock"]}`} tone="stable" />
+              <StatusPill label={`Agent 摘要来源：${agentSourceLabel}`} tone="stable" />
             </div>
           </dd>
         </div>
@@ -120,11 +125,11 @@ export const CareTaskCard = ({
         </button>
         <button
           className="primary"
-          disabled={!canComplete || isCompleted}
+          disabled={!canComplete || isCompleted || isCancelled}
           title={canComplete ? "完成并写入固定模拟备注" : "确认晚药后才能完成"}
           onClick={() => dispatch({ type: "COMPLETE_CARE_TASK" })}
         >
-          {isCompleted ? "已完成" : "完成并记录"}
+          {isCompleted ? "已完成" : isCancelled ? "已取消" : "完成并记录"}
         </button>
       </div>
     </article>

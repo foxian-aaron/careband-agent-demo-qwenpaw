@@ -66,6 +66,7 @@ export const taskStatusLabels: Record<string, string> = {
   pending: "待处理",
   in_progress: "处理中",
   completed: "已完成",
+  cancelled: "已取消",
 };
 
 export const careLoopLabels: Record<CareLoopStatus, string> = {

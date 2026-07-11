@@ -25,7 +25,7 @@ export const VoiceInputSimulator = ({ elderId }: VoiceInputSimulatorProps) => {
         <span>语音输入模拟</span>
         <h2>文字模拟老人语音进入系统</h2>
       </div>
-      <MockNoticeBanner>当前为文字模拟语音输入，后续可接 ASR / TTS，不调用真实语音服务。</MockNoticeBanner>
+      <MockNoticeBanner>当前只用文字模拟语音采集，但会按真实 voice 事件契约进入后端；不保存原始录音，也不调用 ASR / TTS。</MockNoticeBanner>
       <textarea
         placeholder="输入老人语音内容，例如：我有点头晕 / 我不舒服 / 我找不到路"
         value={text}
@@ -38,7 +38,7 @@ export const VoiceInputSimulator = ({ elderId }: VoiceInputSimulatorProps) => {
           </button>
         ))}
         <button className="primary" onClick={() => submit(text)}>
-          生成语音事件（Mock）
+          提交 voice 事件
         </button>
       </div>
     </section>

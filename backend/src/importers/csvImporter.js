@@ -39,7 +39,7 @@ function parseCsvLine(line) {
   return result.map((value) => value.trim());
 }
 
-export function parseDailySnapshotsCsv(csvText) {
+export function parseDailySnapshotsCsv(csvText, options = {}) {
   const lines = csvText
     .replace(/^\uFEFF/, "")
     .split(/\r?\n/)
@@ -59,6 +59,8 @@ export function parseDailySnapshotsCsv(csvText) {
   return lines.slice(1).map((line, rowIndex) => {
     const values = parseCsvLine(line);
     const raw = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
+    if (options.elderId) raw.elder_id = options.elderId;
+    if (options.dataSource) raw.data_source = options.dataSource;
     const parsed = snapshotSchema.safeParse(raw);
     if (!parsed.success) {
       throw new Error(`CSV 第 ${rowIndex + 2} 行格式错误：${parsed.error.message}`);

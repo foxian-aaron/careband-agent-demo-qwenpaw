@@ -8,7 +8,7 @@ export const mockSnapshots: DailySnapshot[] = [
     date: "2026-06-19",
     snapshotId: "APPLE-TEST001-2026-06-19",
     dataSource: "Apple Health Export",
-    dataQuality: 85,
+    dataQuality: 0.85,
     heartRate: 69.1,
     restingHeartRate: 66,
     stepsToday: 1099,
