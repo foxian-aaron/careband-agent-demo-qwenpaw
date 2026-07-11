@@ -74,7 +74,11 @@ export const MemoryIntakePage = ({ elderId }: MemoryIntakePageProps) => {
             ))}
           </select>
         </label>
-        <textarea value={input} onChange={(event) => setInput(event.target.value)} />
+        <textarea
+          aria-label="历史照护资料内容"
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+        />
         <div className="button-row">
           <button className="primary" onClick={generateDraft} disabled={loading || !input.trim()}>
             {loading ? "生成中..." : "生成初始照护记忆草稿"}

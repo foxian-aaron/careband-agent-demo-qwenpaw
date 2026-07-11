@@ -18,13 +18,7 @@ npm run derive:apple-health -- ../private_data/apple_health/export.xml
 ```
 
 5. Import the derived CSV with the backend CSV endpoint.
-6. For public static preview, open:
-
-```text
-https://foxian-aaron.github.io/careband-agent-demo/v0.2/#/elder/TEST001
-```
-
-For full local backend mode, open:
+6. v0.2 currently has no public static-preview URL. For full local backend mode, open:
 
 ```text
 http://localhost:3001/#/elder/TEST001

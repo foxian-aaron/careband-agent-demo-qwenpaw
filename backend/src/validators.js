@@ -493,12 +493,16 @@ export const taskPatchSchema = z.preprocess(
       status: legacyStatuses[input.status] ?? input.status,
     };
   },
-  z.object({
-  status: z.enum(TASK_STATUSES).optional(),
-  handled_by: z.string().nullable().optional(),
-  handled_note: z.string().nullable().optional(),
-  completed_at: z.string().nullable().optional(),
-  }),
+  z
+    .object({
+      status: z.enum(TASK_STATUSES).optional(),
+      handled_by: z.string().trim().min(1).max(80).nullable().optional(),
+      handled_note: z.string().trim().min(1).max(1000).nullable().optional(),
+    })
+    .strict()
+    .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
+      message: "At least one task field must be provided.",
+    }),
 );
 
 export const agentAnalyzeSchema = z.object({

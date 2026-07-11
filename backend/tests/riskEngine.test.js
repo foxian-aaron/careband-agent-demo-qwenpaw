@@ -124,6 +124,24 @@ test("fall risk uses confidence rather than treating every signal as urgent", ()
   assert.equal(lowConfidence.status_level, "observation");
 });
 
+test("fall confidence remains actionable when no wearable snapshot is available", () => {
+  const mediumConfidence = evaluateRisk({
+    elder,
+    baseline,
+    snapshot: null,
+    events: [{ event_type: "fall", payload: { confidence: 0.6 } }],
+  });
+  const lowConfidence = evaluateRisk({
+    elder,
+    baseline,
+    snapshot: null,
+    events: [{ event_type: "fall", payload: { confidence: 0.3 } }],
+  });
+
+  assert.equal(mediumConfidence.status_level, "high_risk");
+  assert.equal(lowConfidence.status_level, "observation");
+});
+
 test("multiple fall signals use the highest active confidence", () => {
   const result = evaluateRisk({
     elder,

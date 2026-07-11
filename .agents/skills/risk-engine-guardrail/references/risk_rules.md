@@ -21,7 +21,7 @@
 
 1. Any active `sos` event returns `urgent`, even when no snapshot exists. A client severity hint cannot downgrade it.
 2. A fall confidence of at least 0.8 returns `urgent`; at least 0.5 returns `high_risk`; lower confidence is `observation` pending human verification.
-3. If no direct emergency exists, missing snapshot, `data_quality < 40`, or `wear_time_hours < 6` returns `data_insufficient`.
+3. If no direct emergency or active fall signal exists, missing snapshot, `data_quality < 40`, or `wear_time_hours < 6` returns `data_insufficient`.
 4. Dizziness plus the latest unconfirmed medication signal returns `high_risk`.
 5. Steps below 50% of the seven-day baseline together with sleep below 75% returns `attention`.
 6. A single strong step or sleep deviation returns `observation`.

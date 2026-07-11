@@ -33,12 +33,12 @@ export const buildOpenAiPromptInput = (input, { repairErrors = [] } = {}) =>
       events: input.events,
       risk_result: input.risk_result,
       hard_safety_rule:
-        "Explain care-risk signals only. Do not invent a medical diagnosis, disease, prescription, or clinical conclusion.",
+        "Copy status_level, risk_score, key_reasons, and recommended_action exactly from risk_result. Explain care-risk signals only. Do not invent a medical diagnosis, disease, prescription, or clinical conclusion.",
       ...(repairErrors.length
         ? {
             validation_repair_errors: repairErrors,
             repair_instruction:
-              "Correct every listed validation error while copying the deterministic risk fields exactly.",
+              "Correct every listed validation error while copying the four deterministic rule fields exactly.",
           }
         : {}),
     },
@@ -55,7 +55,7 @@ export async function runOpenAiAgent(input, options = {}) {
     client.responses.create({
       model,
       instructions:
-        "You are an elderly-care AI Agent for a demo. Generate concise, actionable, non-diagnostic caregiver, family, and institution summaries from the deterministic risk result and daily aggregate data. Return only JSON matching the schema.",
+        "You are an elderly-care AI Agent for a demo. Copy status_level, risk_score, key_reasons, and recommended_action exactly from the deterministic risk result. Generate concise, non-diagnostic caregiver, family, and institution summaries from daily aggregate data. Return only JSON matching the schema.",
       input: buildOpenAiPromptInput(input, options),
       text: {
         format: {

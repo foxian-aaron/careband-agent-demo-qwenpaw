@@ -1131,14 +1131,14 @@ export function updateTask(taskId, changes) {
   const next = {
     task_id: taskId,
     status: nextStatus,
-    handled_by: changes.handled_by ?? current.handled_by,
-    handled_note: changes.handled_note ?? current.handled_note,
+    handled_by: Object.hasOwn(changes, "handled_by") ? changes.handled_by : current.handled_by,
+    handled_note: Object.hasOwn(changes, "handled_note")
+      ? changes.handled_note
+      : current.handled_note,
     updated_at: nowIso(),
-    completed_at:
-      changes.completed_at ??
-      (["resolved", "cancelled"].includes(changes.status) && !current.completed_at
-        ? nowIso()
-        : current.completed_at),
+    completed_at: ["resolved", "cancelled"].includes(nextStatus)
+      ? current.completed_at ?? nowIso()
+      : null,
   };
 
   db.prepare(

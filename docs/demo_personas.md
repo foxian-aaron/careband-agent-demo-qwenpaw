@@ -48,5 +48,5 @@ Use during presentation:
 
 These personas are seeded mock demo elders for presentation variety.
 
-GitHub Pages `/v0.2/` is a static preview using mock fallback. Full backend
-import and Agent API calls require local or Node-hosted backend mode.
+v0.2 currently has no public Pages deployment. A future static preview must use
+mock fallback; full import and Agent API calls require local or Node-hosted backend mode.

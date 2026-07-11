@@ -89,6 +89,34 @@ test("a repaired second real Agent response is accepted without Mock fallback", 
   assert.equal(response.agent_result.status_level, "high_risk");
 });
 
+test("a real provider cannot rewrite the deterministic recommended action", async () => {
+  let attempts = 0;
+  const response = await analyzeAgent(input, {
+    provider: "qwenpaw",
+    runners: {
+      qwenpaw: async () => {
+        attempts += 1;
+        return {
+          result: {
+            ...input.risk_result,
+            recommended_action: "Different but non-diagnostic follow-up.",
+            caregiver_summary: "请护工查看陈伯并记录现场情况。",
+            family_summary: "照护团队正在跟进陈伯当前情况。",
+            institution_summary: "E001 已进入优先处理队列。",
+            safety_disclaimer: SAFETY_DISCLAIMER,
+          },
+          rawResponse: "{}",
+        };
+      },
+    },
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(response.meta.provider, "mock");
+  assert.equal(response.meta.fallback_used, true);
+  assert.equal(response.agent_result.recommended_action, input.risk_result.recommended_action);
+});
+
 test("OpenAI repair retries include the previous validation errors in the prompt", () => {
   const prompt = JSON.parse(
     buildOpenAiPromptInput(input, {
@@ -138,4 +166,27 @@ test("provider fallback warnings redact bearer tokens and credential-like values
     response.meta.warning,
     /cb_test_REVIEW_TOKEN|review-secret-value|review-access-key/,
   );
+});
+
+test("rule-owned quoted medical evidence cannot break deterministic Mock fallback", async () => {
+  const quotedReason = "User report: diagnosed with Parkinson disease and dizzy.";
+  const response = await analyzeAgent(
+    {
+      ...input,
+      risk_result: { ...input.risk_result, key_reasons: [quotedReason] },
+    },
+    {
+      provider: "qwenpaw",
+      runners: {
+        qwenpaw: async () => {
+          throw new Error("synthetic provider outage");
+        },
+      },
+    },
+  );
+
+  assert.equal(response.meta.provider, "mock");
+  assert.equal(response.meta.fallback_used, true);
+  assert.deepEqual(response.agent_result.key_reasons, [quotedReason]);
+  assert.doesNotMatch(response.agent_result.caregiver_summary, /diagnosed with Parkinson/i);
 });

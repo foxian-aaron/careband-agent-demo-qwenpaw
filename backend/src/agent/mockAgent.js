@@ -1,4 +1,5 @@
 import { SAFETY_DISCLAIMER } from "../constants.js";
+import { hasProhibitedMedicalLanguage } from "./agentOutputValidator.js";
 
 const statusText = {
   stable: "状态稳定",
@@ -13,6 +14,10 @@ export function runMockAgent({ elder_profile, daily_snapshot, risk_result }, opt
   const elderName = elder_profile?.name ?? elder_profile?.elder_name ?? "长者";
   const level = risk_result?.status_level ?? "data_insufficient";
   const reasons = risk_result?.key_reasons ?? ["暂无明显异常"];
+  const safeReasons = reasons.filter((reason) => !hasProhibitedMedicalLanguage(reason));
+  const reasonSummary = safeReasons.length
+    ? safeReasons.join("；")
+    : "规则引擎记录到一项需要照护人员人工复核的健康相关反馈。";
   const source = daily_snapshot?.data_source ?? "Demo Seed";
   const quality = daily_snapshot?.data_quality ?? 0;
 
@@ -22,7 +27,7 @@ export function runMockAgent({ elder_profile, daily_snapshot, risk_result }, opt
     status_level: level,
     risk_score: Number(risk_result?.risk_score ?? 0),
     key_reasons: reasons,
-    caregiver_summary: `${fallbackPrefix}${elderName}当前为“${statusText[level] ?? level}”。数据来源：${source}，数据质量 ${quality}%。${reasons.join("；")} 请照护人员结合现场情况复核。`,
+    caregiver_summary: `${fallbackPrefix}${elderName}当前为“${statusText[level] ?? level}”。数据来源：${source}，数据质量 ${quality}%。${reasonSummary} 请照护人员结合现场情况复核。`,
     family_summary:
       level === "stable"
         ? `${elderName}今日状态整体平稳，照护团队会继续常规观察。`

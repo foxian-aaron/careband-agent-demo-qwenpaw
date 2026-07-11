@@ -1,6 +1,6 @@
 # CareBand v0.2 本地分支变更说明
 
-本文件记录 `codex/careband-real-demo` 的本地实现范围。当前没有创建 PR、没有 push，也没有进行公网部署；旧版 GitHub Pages 链接不作为本轮闭环证据。
+本文件记录 `codex/careband-real-demo` 的实现范围。源码分支发布状态应从 Git 远端核验；分支 push 不代表已创建 PR 或完成公网部署，旧版 GitHub Pages 链接也不作为本轮闭环证据。
 
 ## 主链路
 
@@ -24,7 +24,7 @@ CSV / Apple Health 日聚合或规范硬件事件
 
 ## 当前验收
 
-- 后端：60/60。
+- 后端：69/69。
 - 前端：81/81。
 - 硬件模式：14/14。
 - 固件原生状态机：11/11；ESP32-S3 DevKitC-1 编译通过。

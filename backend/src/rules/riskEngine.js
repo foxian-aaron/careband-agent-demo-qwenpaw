@@ -133,8 +133,31 @@ export function evaluateRisk({ elder, snapshot, baseline = {}, events = [] }) {
     });
   }
 
+  if (fallEvent && confidence >= 0.5) {
+    return buildResult({
+      elder,
+      statusLevel: "high_risk",
+      riskScore: 82,
+      keyReasons: [`偵測到中等置信度跌倒事件（${Math.round(confidence * 100)}%），需要儘快人工確認。`],
+      triggeredRules: ["fall confidence >= 0.5 => high_risk"],
+      recommendedAction: "請護工儘快到場確認長者狀態，並按現場情況決定是否依機構流程升級。",
+      dataQuality,
+    });
+  }
+
   const wearTimeHours = snapshot?.wear_time_hours;
   if (!snapshot || dataQuality < 40 || (typeof wearTimeHours === "number" && wearTimeHours < 6)) {
+    if (fallEvent) {
+      return buildResult({
+        elder,
+        statusLevel: "observation",
+        riskScore: 35,
+        keyReasons: [`收到低置信度跌倒信號（${Math.round(confidence * 100)}%），建議巡查複核。`],
+        triggeredRules: ["fall confidence < 0.5 => observation"],
+        recommendedAction: "建議護工巡查確認跌倒信號，並同時確認設備佩戴與資料同步。",
+        dataQuality,
+      });
+    }
     const reason = !snapshot
       ? "尚無可用的每日聚合資料，不能判定長者狀態穩定。"
       : typeof wearTimeHours === "number" && wearTimeHours < 6
@@ -188,11 +211,7 @@ export function evaluateRisk({ elder, snapshot, baseline = {}, events = [] }) {
   const triggeredRules = [];
   let score = 12;
 
-  if (fallEvent && confidence >= 0.5) {
-    keyReasons.push(`偵測到中等置信度跌倒事件（${Math.round(confidence * 100)}%），需要儘快人工確認。`);
-    triggeredRules.push("fall confidence >= 0.5 => high_risk");
-    score = Math.max(score, 82);
-  } else if (fallEvent) {
+  if (fallEvent) {
     keyReasons.push(`收到低置信度跌倒信號（${Math.round(confidence * 100)}%），建議巡查複核。`);
     triggeredRules.push("fall confidence < 0.5 => observation");
     score = Math.max(score, 35);

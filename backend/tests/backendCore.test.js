@@ -430,6 +430,55 @@ test("resolving a caregiver task resolves every event linked to that task", asyn
   });
 });
 
+test("task patches keep completion time server-owned and bound audit text", async () => {
+  db.resetDemoData();
+
+  await withServer(async (baseUrl) => {
+    const eventResponse = await fetch(`${baseUrl}/api/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        elder_id: "E001",
+        event_type: "sos",
+        source: "mock",
+        occurred_at: new Date().toISOString(),
+        payload: { action: "long_press" },
+      }),
+    });
+    const eventBody = await eventResponse.json();
+    const taskUrl = `${baseUrl}/api/tasks/${eventBody.task.task_id}`;
+    const patch = (body) =>
+      fetch(taskUrl, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    assert.equal((await patch({})).status, 400);
+    assert.equal(
+      (await patch({ status: "in_progress", completed_at: "not-a-date" })).status,
+      400,
+    );
+    assert.equal((await patch({ handled_by: "x".repeat(81) })).status, 400);
+    assert.equal((await patch({ handled_note: "x".repeat(1001) })).status, 400);
+
+    const inProgressResponse = await patch({
+      status: "in_progress",
+      handled_by: "护工A",
+      handled_note: "正在现场核实。",
+    });
+    const inProgressBody = await inProgressResponse.json();
+    assert.equal(inProgressResponse.status, 200);
+    assert.equal(inProgressBody.task.completed_at, null);
+
+    const resolvedResponse = await patch({ status: "resolved" });
+    const resolvedBody = await resolvedResponse.json();
+    assert.equal(resolvedResponse.status, 200);
+    assert.equal(resolvedBody.task.status, "resolved");
+    assert.equal(Number.isNaN(Date.parse(resolvedBody.task.completed_at)), false);
+  });
+});
+
 test("caregiver lifecycle notes do not reopen a task after the care loop is resolved", async () => {
   db.resetDemoData();
 

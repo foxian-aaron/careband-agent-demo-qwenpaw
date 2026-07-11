@@ -8,8 +8,8 @@ const buildTaskText = (input, repairErrors = []) =>
   [
     "You are the CareBand summary Agent for an elder-care demo.",
     "Return JSON only. Do not wrap it in Markdown or prose.",
-    "The deterministic rule engine already decided status_level, risk_score, and key_reasons.",
-    "Copy those three fields exactly. You may only summarize, explain, and recommend human follow-up.",
+    "The deterministic rule engine already decided status_level, risk_score, key_reasons, and recommended_action.",
+    "Copy those four fields exactly. You may only summarize and explain the human follow-up for each audience.",
     "Do not diagnose a disease, prescribe medication, change a dose, or claim clinical certainty.",
     `Output JSON Schema: ${JSON.stringify(agentOutputJsonSchema)}`,
     repairErrors.length

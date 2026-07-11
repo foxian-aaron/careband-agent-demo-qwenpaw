@@ -52,6 +52,7 @@ export const MemoryItemConfirmTable = ({ draft, dispatch }: MemoryItemConfirmTab
                 <td>{item.category}</td>
                 <td>
                   <textarea
+                    aria-label={`编辑${item.category}记忆内容`}
                     value={draftTexts[item.id] ?? item.content}
                     onChange={(event) =>
                       setDraftTexts((current) => ({

@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-demo.ps1 -HardwareMode
 
 硬件模式仍让前端只监听 `127.0.0.1`，仅将后端绑定到 `0.0.0.0:3001`，并在终端打印 ESP32 可用的 `http://<电脑局域网IP>:3001/api/events` 候选地址。选择与开发板同一网段的地址填入被 Git 忽略的 `config_local.h`。该原型接口没有设备认证或 TLS，只能临时用于可信私有局域网；不要配置公网端口转发，Windows 防火墙提示时只允许专用网络。
 
-本分支只用于本地比赛演示，不包含 GitHub push、PR、公网部署、真实长者数据、真实录音或医疗能力。
+本分支用于本地比赛演示和源码审查。源码分支只有在用户明确授权后才可推送；分支 push 不等于 PR 或公网部署。本分支不包含真实长者数据、真实录音或医疗能力。
 
 CareBand Agent v0.2 是學生 AI 競賽用的落地驗證 demo。核心流程不是單純健康看板，而是：
 
@@ -49,19 +49,15 @@ wearable data -> DailySnapshot -> personal baseline -> riskEngine -> AI Agent su
 本結果僅為照護風險提示，不構成醫療診斷。
 ```
 
-## Current Public Demo Status
+## Deployment Status
 
 - Original demo root path:
   - https://foxian-aaron.github.io/careband-agent-demo/#/institution
   - https://foxian-aaron.github.io/careband-agent-demo/#/elder/E001/profile
   - https://foxian-aaron.github.io/careband-agent-demo/#/medication/E001
-- v0.2 static preview:
-  - https://foxian-aaron.github.io/careband-agent-demo/v0.2/#/institution
-  - https://foxian-aaron.github.io/careband-agent-demo/v0.2/#/elder/TEST001
-  - https://foxian-aaron.github.io/careband-agent-demo/v0.2/#/elder/E001/profile
-  - https://foxian-aaron.github.io/careband-agent-demo/v0.2/#/medication/E001
+- v0.2: source branch only; no current public Pages URL. Run it locally using the commands below.
 
-Important: GitHub Pages is static only. The `/v0.2/` public link uses mock fallback data and does not run Express, SQLite, OpenAI, or backend API routes. Full backend mode must be run locally or deployed to a Node-compatible host.
+Important: pushing `codex/careband-real-demo` does not trigger the existing Pages workflow. If a v0.2 static preview is deployed later, GitHub Pages still cannot run Express, SQLite, QwenPaw/OpenAI, or backend API routes. Full backend mode must be run locally or deployed to a Node-compatible host.
 
 ## Demo Personas
 
@@ -180,7 +176,7 @@ npm run build
 
 Current local validation for the real closed-loop branch:
 
-- Backend tests: 60 passed
+- Backend tests: 69 passed
 - Frontend tests: 81 passed
 - Hardware-mode PowerShell tests: 14 passed
 - TypeScript: passed
@@ -190,7 +186,7 @@ Current local validation for the real closed-loop branch:
 - ESP32-S3 DevKitC-1 firmware build: passed
 - Three consecutive API/SQLite demo runs and three consecutive browser UI runs: passed with labelled Mock fallback
 - QwenPaw provider bridge and fake-SSE tests: passed; the live Alibaba call currently returns 401 and still requires a refreshed credential
-- No public deployment or GitHub push is part of this branch
+- Source-branch publication is separate from PR or public deployment; v0.2 currently has no public Pages URL
 
 ## Key Docs
 

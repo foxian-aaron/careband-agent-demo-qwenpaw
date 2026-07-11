@@ -10,7 +10,7 @@ This file is the durable handoff for future CareBand chats. Read it before work 
 - Local branch: `codex/careband-real-demo`
 - Verified implementation baseline before this memory was added: `470cc535208612ef4c4c667f207d69e1d7f713a7`
 - Repository state before this memory-only change: clean
-- GitHub state: not pushed; no pull request; no public deployment
+- GitHub publication policy: verify the remote directly. A source-branch push requires explicit user authorization and does not imply a pull request or public deployment.
 - `careband-agent-demo-v02` is UI reference only and must not be merged wholesale.
 
 ## Product Invariants
@@ -29,6 +29,7 @@ This file is the durable handoff for future CareBand chats. Read it before work 
 - Canonical events are `sos`, `fall`, `voice`, `medication`, `location`, `device_status`, and `manual_note`; legacy event names are normalized at ingress.
 - The backend rebuilds elder context and calculates risk instead of trusting a client-supplied risk result.
 - Core behaviors include SOS to urgent, dizziness plus unconfirmed evening medication to high risk, wear time below six hours to data insufficient, fall-confidence handling, and correct resting-heart-rate use.
+- Any active fall signal remains actionable without a wearable snapshot: medium confidence is `high_risk`, low confidence is `observation`, and confidence at least 0.8 is `urgent`.
 - Only unresolved events inside the effective window influence risk.
 - Resolving a task resolves its linked event so historical SOS/fall events do not permanently hold risk or recreate tasks.
 - SQLite migrations cover event/task relationships, Agent runs, import history, and audits.
@@ -39,6 +40,7 @@ This file is the durable handoff for future CareBand chats. Read it before work 
 - `qwenpaw`, `openai`, and deterministic `mock` providers share one interface.
 - A requested real provider falls directly to visible Mock fallback on failure; it does not silently spend against another paid provider.
 - Agent JSON is validated with the project Schema, fixed disclaimer, non-empty evidence, non-diagnostic wording, and exact risk consistency.
+- `recommended_action` is rule-owned alongside status, score, and reasons. Common direct Chinese/English diagnosis and medication instructions are rejected, while quoted rule evidence and safe care observations remain usable.
 - One validation repair attempt is supported before fallback.
 - Agent runs record requested and actual provider, model, latency, validation result, failure reason, aggregate input, and a length-limited raw response; secrets and raw health exports are excluded.
 - Caregiver, family, and institution views consume the same validated Agent result and show provider, latency, validation, and fallback provenance.
@@ -51,6 +53,8 @@ This file is the durable handoff for future CareBand chats. Read it before work 
 - Dashboards show seven distinct snapshot dates, a baseline excluding the selected date, source, last synchronization, completeness, and quality.
 - Demo controls, hardware simulation, and voice/event entry use the same normalized event path online and equivalent deterministic fallback semantics offline.
 - The local-only `/api/demo/reset` resets E001-E004 demo state while preserving TEST001. It requires explicit local enablement and loopback access.
+- Task patches reject unknown or empty input, bound handler text, and keep `completed_at` server-owned; non-terminal tasks cannot carry a forged completion time.
+- Core text inputs have accessible names, and risk/status pill text meets WCAG AA contrast in the verified palette.
 
 ### Hardware software package
 
@@ -67,7 +71,7 @@ This file is the durable handoff for future CareBand chats. Read it before work 
 ## Verified Evidence at This Snapshot
 
 - Frontend tests: 81/81 passed.
-- Backend tests: 60/60 passed.
+- Backend tests: 69/69 passed.
 - PowerShell hardware-mode checks: 14/14 passed.
 - Native firmware state-machine tests: 11/11 passed.
 - ESP32-S3 PlatformIO build: passed (approximately 14.2% RAM and 26.8% flash).
@@ -79,7 +83,8 @@ This file is the durable handoff for future CareBand chats. Read it before work 
 - TypeScript and production Vite build passed.
 - Agent Schema compilation passed, and the repository Schema matched the backend-bundled Schema.
 - Secret and sensitive-path scans were clean.
-- Final pitch deck contains nine slides and passed template-fidelity and overflow checks.
+- Three independent release reviews closed with 0 Critical and 0 Required findings after the safety, accessibility, task-audit, risk-order, and deployment-document fixes.
+- Final pitch deck contains nine slides and passed template-fidelity and overflow checks. Its displayed backend count is the earlier 60/60 baseline; refresh that slide together with the user's remaining final media before the competition submission. Do not mutate PPTX XML directly.
 
 ## Not Yet Proven or Completed
 
@@ -120,5 +125,5 @@ Resume in this order:
 3. Recheck ports/processes before starting services. At the last snapshot, ports 8088, 3001, and 5173 were closed and no demo service was running.
 4. Recheck only the external condition the user says changed. Do not make another paid model call unless the Alibaba credential has been refreshed.
 5. Keep all validation data fictional or aggregated (`E001`/TEST001); never send real elder-identifying data to a model.
-6. Do not push, open a pull request, deploy, buy hardware, or contact participants unless the user explicitly authorizes that action in the current conversation.
+6. Do not push, open a pull request, deploy, buy hardware, or contact participants unless the user explicitly authorizes that action in the current conversation. Record any completed external action here after verifying it.
 7. Update this memory with new evidence, including the date, exact test result, and remaining limitations.

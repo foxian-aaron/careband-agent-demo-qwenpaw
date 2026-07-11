@@ -1,14 +1,12 @@
 # CareBand Agent v0.2 Deployment
 
-## Public Paths
+## Deployment Status
 
 - Original static demo root:
   - `https://foxian-aaron.github.io/careband-agent-demo/#/institution`
-- v0.2 static preview:
-  - `https://foxian-aaron.github.io/careband-agent-demo/v0.2/#/institution`
-  - `https://foxian-aaron.github.io/careband-agent-demo/v0.2/#/elder/TEST001`
+- v0.2 has no current public Pages deployment. `codex/careband-real-demo` is a source branch and does not trigger the existing Pages workflow.
 
-The app uses hash routing (`#/...`) so GitHub Pages can serve every deep link from the same static `index.html`. The v0.2 Vite build uses relative assets, so JS/CSS files load correctly under `/careband-agent-demo/v0.2/`.
+The app uses hash routing (`#/...`). If v0.2 is deliberately deployed later, configure and verify a real public base URL before sharing it.
 
 ## GitHub Pages Static Preview
 
@@ -18,11 +16,11 @@ It does not run:
 
 - Express
 - SQLite
-- OpenAI calls
+- QwenPaw or OpenAI calls
 - `/api/*` backend routes
 - Apple Health XML or CSV import endpoints
 
-Therefore the public `/v0.2/` preview must display a static preview banner and use frontend mock fallback data.
+Therefore any future public v0.2 preview must display a static preview banner and use frontend mock fallback data.
 
 ## Local Full Backend Mode
 
@@ -59,14 +57,24 @@ Backend:
 
 ```text
 PORT=3001
+BACKEND_HOST=127.0.0.1
+SERVE_STATIC_FRONTEND=true
+HARDWARE_MODE=false
 DATABASE_PATH=data/careband.sqlite
-CORS_ORIGIN=*
-USE_MOCK_AGENT=true
+CORS_ORIGIN=http://127.0.0.1:5173
+AGENT_PROVIDER=qwenpaw
+USE_MOCK_AGENT=false
+QWENPAW_BASE_URL=http://127.0.0.1:8088
+QWENPAW_AGENT_ID=careband_summary_agent
+QWENPAW_MODEL_LABEL=qwen3.6-plus
+QWENPAW_TIMEOUT_MS=5000
+ALLOW_TEAM_TEST_REAL_AGENT=false
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 AGENT_TIMEOUT_MS=30000
 APPLE_HEALTH_STEP_SOURCE_STRATEGY=prefer_watch
-ENABLE_DEMO_RESET=false
+APPLE_HEALTH_XML_UPLOAD_MAX_MB=150
+ALLOW_DEMO_RESET=false
 ```
 
 Frontend:
@@ -87,7 +95,18 @@ For single-origin production, leave `VITE_API_BASE_URL` unset so the frontend ca
 
 ## Full Backend Public Deployment
 
-Use a Node-compatible host for the complete backend demo. Do not fake this on GitHub Pages.
+The following host notes are an unverified future deployment draft; no v0.2 public backend is currently deployed. Use a Node-compatible host for the complete backend demo and perform a fresh security review before exposing it. Do not fake this on GitHub Pages.
+
+Every public host must explicitly set:
+
+```text
+BACKEND_HOST=0.0.0.0
+SERVE_STATIC_FRONTEND=true
+CORS_ORIGIN=https://<verified-public-origin>
+AGENT_PROVIDER=<openai|qwenpaw>
+```
+
+`AGENT_PROVIDER` never switches automatically because an API key exists. For `openai`, set `OPENAI_API_KEY` as a host secret. For `qwenpaw`, set `QWENPAW_BASE_URL` to a separately secured and reachable QwenPaw service and configure its credential outside Git. Never commit either credential.
 
 ### Render
 
@@ -103,7 +122,7 @@ npm install && cd backend && npm install && cd .. && npm run build
 cd backend && npm start
 ```
 
-- Env vars: `PORT`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `USE_MOCK_AGENT`, `AGENT_TIMEOUT_MS`.
+- Env vars: the required public-host values above plus `PORT`, `OPENAI_MODEL`, `AGENT_TIMEOUT_MS`, and a persistent `DATABASE_PATH` when retention is needed.
 - Privacy: do not upload raw Apple Health XML/ZIP to the repo.
 - SQLite warning: use a persistent disk if the demo must retain imported snapshots.
 
@@ -121,7 +140,7 @@ npm install && cd backend && npm install && cd .. && npm run build
 cd backend && npm start
 ```
 
-- Add the same env vars as Render.
+- Add the same explicit host, CORS, Provider, and secret variables as Render.
 - Check Railway volume/persistence settings before relying on SQLite data.
 
 ### Fly.io
@@ -151,6 +170,8 @@ npm run build
 cd backend
 npm start
 ```
+
+Before starting, set `BACKEND_HOST=0.0.0.0`, a specific `CORS_ORIGIN`, and an explicit `AGENT_PROVIDER` as described above.
 
 Verification:
 
@@ -194,5 +215,4 @@ From the v0.2 root:
 npm run check:public
 ```
 
-This lightweight check loads the original root HTML, v0.2 HTML, and v0.2 referenced JS/CSS assets. It does not replace manual browser QA.
-
+By default this check verifies only the existing original root. To validate a future v0.2 deployment, set `CAREBAND_V02_PUBLIC_URL` to the deployed base URL; the command then checks its HTML and referenced JS/CSS assets. It does not replace manual browser QA.

@@ -5,7 +5,7 @@ The branch URL is not the same as a real pull request URL.
 Branch URL:
 
 ```text
-https://github.com/foxian-aaron/careband-agent-demo/tree/careband-v0.2-apple-health
+https://github.com/foxian-aaron/careband-agent-demo/tree/codex/careband-real-demo
 ```
 
 Expected real PR URL format:
@@ -14,16 +14,16 @@ Expected real PR URL format:
 https://github.com/foxian-aaron/careband-agent-demo/pull/<number>
 ```
 
-## Create The PR In GitHub UI
+## Create The PR In GitHub UI (only with explicit user authorization)
 
 1. Open `https://github.com/foxian-aaron/careband-agent-demo`.
-2. Click `Compare & pull request` for `careband-v0.2-apple-health`.
+2. Click `Compare & pull request` for `codex/careband-real-demo`.
 3. Base branch: `main`.
-4. Head branch: `careband-v0.2-apple-health`.
+4. Head branch: `codex/careband-real-demo`.
 5. Title:
 
 ```text
-feat: CareBand Agent v0.2 Apple Health pipeline
+feat: CareBand Agent v0.2 real demo loop
 ```
 
 6. Paste `docs/pr_description.md`.
@@ -36,15 +36,15 @@ Only run this if `gh` is installed and authenticated:
 ```bash
 gh pr create \
   --base main \
-  --head careband-v0.2-apple-health \
-  --title "feat: CareBand Agent v0.2 Apple Health pipeline" \
+  --head codex/careband-real-demo \
+  --title "feat: CareBand Agent v0.2 real demo loop" \
   --body-file docs/pr_description.md
 ```
 
 ## Before Requesting Review
 
 - Original demo still works at the root GitHub Pages path.
-- v0.2 static preview works under `/v0.2/`.
+- If a v0.2 static preview is deliberately deployed, its verified URL works; a source-branch push alone is not a deployment.
 - The v0.2 banner clearly says GitHub Pages is a static preview using mock fallback.
 - TEST001 displays team Apple Watch test data, not 陳伯.
 - Unknown elder routes do not fallback to E001.
@@ -68,4 +68,3 @@ The PR body should include:
 - Apple Health privacy notes
 - TEST001 / E001 explanation
 - Remaining risks
-

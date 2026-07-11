@@ -326,7 +326,6 @@ export interface BackendTaskPatch {
   status?: "open" | "acknowledged" | "in_progress" | "resolved" | "cancelled";
   handled_by?: string | null;
   handled_note?: string | null;
-  completed_at?: string | null;
 }
 
 export interface BackendAgentAnalyzeInput {

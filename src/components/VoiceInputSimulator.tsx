@@ -27,6 +27,7 @@ export const VoiceInputSimulator = ({ elderId }: VoiceInputSimulatorProps) => {
       </div>
       <MockNoticeBanner>当前只用文字模拟语音采集，但会按真实 voice 事件契约进入后端；不保存原始录音，也不调用 ASR / TTS。</MockNoticeBanner>
       <textarea
+        aria-label="老人语音模拟内容"
         placeholder="输入老人语音内容，例如：我有点头晕 / 我不舒服 / 我找不到路"
         value={text}
         onChange={(event) => setText(event.target.value)}

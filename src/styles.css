@@ -501,48 +501,48 @@ button.primary,
 .tone-stable {
   background: rgba(47, 143, 91, 0.12);
   border-color: rgba(47, 143, 91, 0.22);
-  color: var(--color-stable);
+  color: #1f6442;
 }
 
 .risk-observation,
 .tone-observation {
   background: rgba(47, 128, 160, 0.12);
   border-color: rgba(47, 128, 160, 0.22);
-  color: var(--color-observation);
+  color: #205b72;
 }
 
 .risk-attention,
 .tone-attention {
   background: rgba(197, 138, 24, 0.14);
   border-color: rgba(197, 138, 24, 0.26);
-  color: var(--color-attention);
+  color: #704800;
 }
 
 .risk-high-risk,
 .tone-high-risk {
   background: rgba(221, 107, 32, 0.14);
   border-color: rgba(221, 107, 32, 0.26);
-  color: var(--color-high-risk);
+  color: #873a0b;
 }
 
 .risk-urgent,
 .tone-urgent {
   background: rgba(194, 65, 59, 0.13);
   border-color: rgba(194, 65, 59, 0.26);
-  color: var(--color-urgent);
+  color: #8b2824;
 }
 
 .risk-data-insufficient,
 .tone-muted {
   background: rgba(123, 132, 148, 0.12);
   border-color: rgba(123, 132, 148, 0.24);
-  color: var(--color-muted);
+  color: #4d5664;
 }
 
 .tone-follow-up {
   background: rgba(47, 143, 91, 0.16);
   border-color: rgba(47, 143, 91, 0.3);
-  color: var(--color-stable);
+  color: #1f6442;
 }
 
 .hero-status-stack,

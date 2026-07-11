@@ -41,23 +41,20 @@
 
 老人档案详情。包含语言偏好、所属机构、照护组、照护类型、主责护工、备用护工、家属联系人、紧急联系人和授权状态。
 
-## CareEvent
+## CareEvent / event
 
-照护事件。包含事件 ID、老人 ID、事件类型、时间、标题、原始文本、来源和严重程度。v0.1.1 扩展了结构化字段，业务逻辑不再依赖 `title.includes(...)`：
+照护事件。所有输入在入库前规范化，完整契约以 `.agents/skills/careband-event-contract/references/events.schema.json` 为准：
 
-- `eventType`：包括 `medication_reminder`、`medication_confirmed`、`voice_symptom`、`sos`、`fall_detected`、`location_alert`、`night_wakeup`、`low_activity`、`caregiver_accepted`、`caregiver_checked`、`caregiver_completed`、`system_risk_update`。
-- `payload.symptomKeywords`：语音主诉识别出的关键词，如“头晕”。
-- `payload.medicationName`：确认的用药项，如“晚药”。
-- `payload.safeZoneStatus`：位置事件中的安全区状态。
-- `payload.nightWakeupCount`：夜间离床次数。
-- `payload.activityDropPercent`：活动下降比例。
-- `payload.noResponseSeconds`：跌倒事件后未回应秒数。
+- `event_type`：只允许 `sos`、`fall`、`voice`、`medication`、`location`、`device_status`、`manual_note`。旧名称只在入口转换。
+- `payload.action`：表示具体动作，例如 `long_press`、`symptom_report`、`confirmed`、`geofence_exit` 或 `caregiver_completed`。
+- `payload.symptom_keywords`：语音主诉识别出的关键词，如“头晕”。
+- `payload.medication_name`：涉及的用药项，如“晚药”；只作照护确认，不作处方建议。
+- `payload.safe_zone_status`：位置事件中的安全区状态，只保留区域级位置。
+- `payload.no_response_seconds`：跌倒事件后未回应秒数。
+- `payload.confidence`：0-1 跌倒置信度。
 - `payload.note`：护工处理备注。
-- `payload.previousValue/currentValue`：状态变更前后的值。
 - `status`：事件处理状态，`open`、`acknowledged` 或 `resolved`。
-- `linkedTaskId`：事件关联的护工任务。
-- `handledBy/handledAt`：处理人和处理时间。
-- `confidence`：模拟识别置信度。
+- `linked_task_id`：事件关联的护工任务。
 
 ## RiskResult
 
@@ -65,11 +62,11 @@
 
 ## CareTask
 
-护工任务。包含任务 ID、老人 ID、来源事件、优先级、标题、原因、建议动作、负责人、任务状态、创建更新时间、完成时间和护工备注。
+护工任务。包含任务 ID、老人 ID、来源事件、优先级、标题、原因、建议动作、负责人、任务状态、创建更新时间、服务端生成的完成时间和护工备注。状态只允许 `open`、`acknowledged`、`in_progress`、`resolved`、`cancelled`。
 
 ## AgentRoleSummaries
 
-Mock AI Agent 输出。包含护工摘要、家属摘要、机构摘要和 Decision Trace。三端文案由同一份风险结果生成，但面向不同角色。
+通过 Schema 验证的 Agent 输出。Provider 可以是 QwenPaw、OpenAI 或明确标记的 Mock fallback；三端文案来自同一份规则结果，但面向不同角色。`status_level`、`risk_score`、`key_reasons` 和 `recommended_action` 必须逐字匹配规则引擎。
 
 ## careLoopStatus / displayStatus
 
