@@ -9,7 +9,7 @@ import { SAFETY_DISCLAIMER } from "../constants.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workspaceSkillSchemaPath = path.resolve(
   __dirname,
-  "../../../../.agents/skills/agent-json-summary-validator/references/agent_output.schema.json",
+  "../../../.agents/skills/agent-json-summary-validator/references/agent_output.schema.json",
 );
 const bundledSchemaPath = path.resolve(__dirname, "../schemas/agent_output.schema.json");
 const schemaPath = fs.existsSync(workspaceSkillSchemaPath)

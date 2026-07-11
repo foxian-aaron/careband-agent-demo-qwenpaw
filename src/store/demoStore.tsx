@@ -319,6 +319,8 @@ const mapBackendPayload = (payload: Record<string, unknown> = {}): CareEvent["pa
   nightWakeupCount: payload.night_wakeup_count as number | undefined,
   activityDropPercent: payload.activity_drop_percent as number | undefined,
   noResponseSeconds: payload.no_response_seconds as number | undefined,
+  confidence: payload.confidence as number | undefined,
+  fallConfidence: payload.fall_confidence as number | undefined,
   note: payload.note as string | undefined,
   previousValue: payload.previous_value as number | string | undefined,
   currentValue: payload.current_value as number | string | undefined,
@@ -344,6 +346,7 @@ const mapBackendEvent = (event: BackendEvent): CareEvent => ({
   rawText: event.raw_text ?? undefined,
   source: backendSourceToLocal(event.source),
   payload: mapBackendPayload(event.payload),
+  confidence: Number(event.payload?.confidence ?? event.payload?.fall_confidence) || undefined,
   status: event.status === "resolved" ? "resolved" : "open",
   linkedTaskId: event.linked_task_id ?? undefined,
   handledBy: event.resolved_by ?? undefined,
@@ -773,18 +776,18 @@ const hardwareEventCopy: Partial<
   },
   fall_detected: {
     title: "疑似跌倒，等待确认",
-    severity: "high_risk",
-    priority: "high",
-    reason: "手环 IMU 模拟检测到疑似跌倒",
-    recommendedAction: "请护工立即查看现场，并等待老人按钮确认。",
+    severity: "urgent",
+    priority: "urgent",
+    reason: "手环 IMU 模拟检测到高置信度跌倒信号",
+    recommendedAction: "立即通知护工查看现场，并按机构应急流程处理。",
     sourceType: "hardware_event",
   },
   inactivity_after_fall: {
     title: "跌倒后长时间静止",
-    severity: "high_risk",
-    priority: "high",
-    reason: "疑似跌倒后长时间静止",
-    recommendedAction: "请护工立即确认老人位置和现场情况。",
+    severity: "urgent",
+    priority: "urgent",
+    reason: "高置信度跌倒信号后长时间静止",
+    recommendedAction: "立即通知护工确认老人位置和现场情况。",
     sourceType: "hardware_event",
   },
   no_response_after_fall: {
@@ -884,13 +887,14 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
     case "RESET_DEMO":
       return createInitialDemoState();
     case "TRIGGER_CHEN_DIZZINESS": {
+      const timestamp = isoNow();
       const existingActiveTask = selectActiveTaskForElder(chenId, state.tasks);
       const taskId = existingActiveTask?.taskId ?? nextTaskId(state.tasks, "TASK-E001-DIZZINESS");
       const voiceEvent: CareEvent = {
         eventId: "EVT-E001-DIZZINESS",
         elderId: chenId,
         eventType: "voice_symptom",
-        timestamp: "2026-06-10T20:15:00+08:00",
+        timestamp,
         title: "语音反馈：我有点头晕",
         rawText: "我有点头晕",
         source: "demo",
@@ -906,7 +910,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
         eventId: "EVT-E001-NOTIFY-CAREGIVER",
         elderId: chenId,
         eventType: "system_risk_update",
-        timestamp: "2026-06-10T20:16:00+08:00",
+        timestamp,
         title: "系统通知护工：陈伯需要立即查看",
         source: "system",
         severity: "high_risk",
@@ -924,8 +928,8 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
           "请护工立即查看，确认是否已进食和服药，并观察不适是否持续。",
         assignedTo: "护工A",
         status: "pending",
-        createdAt: "2026-06-10T20:16:00+08:00",
-        updatedAt: "2026-06-10T20:16:00+08:00",
+        createdAt: timestamp,
+        updatedAt: timestamp,
       };
 
       return {
@@ -1047,12 +1051,13 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
       };
     }
     case "COMPLETE_CARE_TASK": {
+      const timestamp = isoNow();
       const activeTask = selectActiveTaskForElder(chenId, state.tasks);
       const medicationEvent: CareEvent = {
         eventId: "EVT-E001-MED-PM-CONFIRMED",
         elderId: chenId,
         eventType: "medication_confirmed",
-        timestamp: "2026-06-10T20:22:00+08:00",
+        timestamp,
         title: "晚药已确认",
         source: "caregiver",
         severity: "stable",
@@ -1062,7 +1067,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
         status: "resolved",
         linkedTaskId: activeTask?.taskId,
         handledBy: "护工A",
-        handledAt: "2026-06-10T20:22:00+08:00",
+        handledAt: timestamp,
       };
       const note =
         "20:25 护工A已查看陈伯，已确认晚药，陈伯目前在房间休息，建议明早继续关注活动和睡眠。";
@@ -1070,7 +1075,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
         eventId: "EVT-E001-CAREGIVER-COMPLETED",
         elderId: chenId,
         eventType: "caregiver_completed",
-        timestamp: "2026-06-10T20:25:00+08:00",
+        timestamp,
         title: "护工A已查看陈伯，已确认晚药，陈伯目前在房间休息",
         source: "caregiver",
         severity: "observation",
@@ -1080,8 +1085,31 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
         status: "resolved",
         linkedTaskId: activeTask?.taskId,
         handledBy: "护工A",
-        handledAt: "2026-06-10T20:25:00+08:00",
+        handledAt: timestamp,
       };
+      const resolvedEvents = activeTask
+        ? state.events.map((event) =>
+            (event.linkedTaskId === activeTask.taskId ||
+              event.eventId === activeTask.sourceEventId) &&
+            event.status !== "resolved"
+              ? {
+                  ...event,
+                  status: "resolved" as const,
+                  handledBy: "护工A",
+                  handledAt: timestamp,
+                }
+              : event,
+          )
+        : state.events;
+      const resolvedFallSignal = resolvedEvents.some(
+        (event) =>
+          event.status === "resolved" &&
+          (event.linkedTaskId === activeTask?.taskId ||
+            event.eventId === activeTask?.sourceEventId) &&
+          ["fall_detected", "inactivity_after_fall", "no_response_after_fall"].includes(
+            event.eventType,
+          ),
+      );
 
       return {
         ...state,
@@ -1091,18 +1119,19 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
             ...state.snapshots[chenId],
             medicationEvening: "confirmed",
             locationZone: "房间 203",
-            lastSyncedAt: "2026-06-10T20:25:00+08:00",
+            fallDetected: resolvedFallSignal ? false : state.snapshots[chenId].fallDetected,
+            lastSyncedAt: timestamp,
           },
         },
         medicationPlans: confirmEveningMedicationPlan(state.medicationPlans),
-        events: addEventOnce(addEventOnce(state.events, medicationEvent), completedEvent),
+        events: addEventOnce(addEventOnce(resolvedEvents, medicationEvent), completedEvent),
         tasks: state.tasks.map((task) =>
           activeTask && task.taskId === activeTask.taskId
             ? {
                 ...task,
                 status: "completed",
-                updatedAt: "2026-06-10T20:25:00+08:00",
-                completedAt: "2026-06-10T20:25:00+08:00",
+                updatedAt: timestamp,
+                completedAt: timestamp,
                 note,
               }
             : task,
@@ -1114,13 +1143,14 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
       };
     }
     case "TRIGGER_SOS": {
+      const timestamp = isoNow();
       const existingActiveTask = selectActiveTaskForElder(chenId, state.tasks);
       const taskId = existingActiveTask?.taskId ?? nextTaskId(state.tasks, "TASK-E001-SOS");
       const sosEvent: CareEvent = {
         eventId: "EVT-E001-SOS",
         elderId: chenId,
         eventType: "sos",
-        timestamp: "2026-06-10T20:18:00+08:00",
+        timestamp,
         title: "SOS 测试事件",
         rawText: "SOS 求助",
         source: "demo",
@@ -1139,8 +1169,8 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
           "立即通知护工和机构负责人，并按机构应急流程处理。",
         assignedTo: "护工A",
         status: "pending",
-        createdAt: "2026-06-10T20:18:00+08:00",
-        updatedAt: "2026-06-10T20:18:00+08:00",
+        createdAt: timestamp,
+        updatedAt: timestamp,
       };
 
       return {
@@ -1439,6 +1469,12 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
         severity: copy.severity,
         payload: {
           noResponseSeconds: action.eventType === "no_response_after_fall" ? 30 : undefined,
+          confidence:
+            action.eventType === "fall_detected"
+              ? 0.9
+              : ["inactivity_after_fall", "no_response_after_fall"].includes(action.eventType)
+                ? 0.85
+                : undefined,
           deviceId: device?.deviceId,
           batteryLevel:
             action.eventType === "device_low_battery" ? 12 : device?.batteryLevel,
@@ -2311,7 +2347,9 @@ export const getRiskForElder = (
   state: DemoState,
   elderId: string,
 ): RiskResult => {
-  if (state.backendRiskResults[elderId]) return state.backendRiskResults[elderId];
+  if (state.backend.mode === "connected" && state.backendRiskResults[elderId]) {
+    return state.backendRiskResults[elderId];
+  }
   return calculateRisk({
     profile: state.profiles[elderId],
     baseline: state.baselines[elderId],

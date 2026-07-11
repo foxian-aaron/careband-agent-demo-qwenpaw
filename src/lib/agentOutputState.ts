@@ -37,7 +37,7 @@ export const resolveDashboardAgentState = (
     output: hasCurrentOutput ? output : null,
     run: {
       sourceEventId: run.source_event_id,
-      requestedProvider: run.provider,
+      requestedProvider: run.requested_provider ?? run.provider,
       model: run.model,
       durationMs: run.duration_ms,
       validationStatus: run.validation_status,

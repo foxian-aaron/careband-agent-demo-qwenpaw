@@ -93,6 +93,7 @@ $env:FRONTEND_PORT = "$Port"
 $env:BACKEND_HOST = Get-CareBandBackendHost -HardwareMode:$HardwareMode
 $env:SERVE_STATIC_FRONTEND = Get-CareBandServeStaticFrontend -HardwareMode:$HardwareMode
 $env:HARDWARE_MODE = if ($HardwareMode) { 'true' } else { 'false' }
+$env:ALLOW_DEMO_RESET = 'true'
 $env:CORS_ORIGIN = "http://127.0.0.1:$Port"
 $env:VITE_API_BASE_URL = "http://127.0.0.1:$BackendPort"
 $env:AGENT_PROVIDER = $AgentProvider

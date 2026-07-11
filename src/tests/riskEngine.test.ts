@@ -29,6 +29,7 @@ const inputFor = (
     ...mockEvents.filter((event) => event.elderId === elderId),
     ...extraEvents,
   ],
+  evaluationTime: "2026-06-10T20:30:00+08:00",
 });
 
 describe("riskEngine", () => {
@@ -66,6 +67,38 @@ describe("riskEngine", () => {
     expect(reasons).toContain("步数");
   });
 
+  it("keeps dizziness plus unconfirmed medication high_risk without activity decline", () => {
+    const voiceEvent: CareEvent = {
+      eventId: "TEST-DIZZINESS-NORMAL-ACTIVITY",
+      elderId: "E001",
+      eventType: "voice_symptom",
+      timestamp: "2026-06-10T20:15:00+08:00",
+      title: "语音反馈：我有点头晕",
+      rawText: "我有点头晕",
+      source: "demo",
+      severity: "high_risk",
+      payload: { symptomKeywords: ["头晕"] },
+    };
+    const baseline = byId(mockBaselines, "E001");
+    const result = calculateRisk({
+      profile: byId(mockProfiles, "E001"),
+      baseline,
+      snapshot: {
+        ...byId(mockSnapshots, "E001"),
+        stepsToday: baseline.avgSteps7d,
+        activeMinutes: baseline.avgActiveMinutes7d,
+        sleepDuration: baseline.avgSleep7d,
+        heartRate: baseline.restingHrBaseline,
+        restingHeartRate: baseline.restingHrBaseline,
+      },
+      events: [voiceEvent],
+      evaluationTime: "2026-06-10T20:30:00+08:00",
+    });
+
+    expect(result.riskLevel).toBe("high_risk");
+    expect(result.keyReasons.join("；")).toContain("头晕");
+  });
+
   it("keeps Liang stable when today is close to baseline", () => {
     const result = calculateRisk(inputFor("E004"));
 
@@ -74,7 +107,7 @@ describe("riskEngine", () => {
   });
 
   it("returns data_insufficient when completeness is below 40 percent", () => {
-    const result = calculateRisk(inputFor("E005"));
+    const result = calculateRisk(inputFor("E005", [], { wearTimeHours: 12 }));
 
     expect(result.riskLevel).toBe("data_insufficient");
     expect(result.riskScore).toBeLessThanOrEqual(30);
@@ -132,6 +165,85 @@ describe("riskEngine", () => {
 
     expect(result.riskLevel).toBe("urgent");
     expect(result.riskScore).toBeGreaterThanOrEqual(90);
+  });
+
+  it("uses only unresolved events inside the active 24-hour window", () => {
+    const ignoredEvents: CareEvent[] = [
+      {
+        eventId: "RESOLVED-SOS",
+        elderId: "E004",
+        eventType: "sos",
+        timestamp: "2026-06-10T20:29:00+08:00",
+        title: "resolved",
+        source: "demo",
+        status: "resolved",
+      },
+      {
+        eventId: "STALE-SOS",
+        elderId: "E004",
+        eventType: "sos",
+        timestamp: "2026-06-09T19:00:00+08:00",
+        title: "stale",
+        source: "demo",
+        status: "open",
+      },
+      {
+        eventId: "FUTURE-SOS",
+        elderId: "E004",
+        eventType: "sos",
+        timestamp: "2026-06-10T20:36:00+08:00",
+        title: "future",
+        source: "demo",
+        status: "open",
+      },
+    ];
+
+    expect(calculateRisk(inputFor("E004", ignoredEvents)).riskLevel).toBe("stable");
+
+    const acknowledgedSos: CareEvent = {
+      ...ignoredEvents[0],
+      eventId: "ACTIVE-ACKNOWLEDGED-SOS",
+      status: "acknowledged",
+    };
+    expect(calculateRisk(inputFor("E004", [acknowledgedSos])).riskLevel).toBe("urgent");
+  });
+
+  it("applies the 0.8 and 0.5 fall-confidence thresholds", () => {
+    const fall = (confidence: number): CareEvent => ({
+      eventId: `FALL-${confidence}`,
+      elderId: "E004",
+      eventType: "fall_detected",
+      timestamp: "2026-06-10T20:29:00+08:00",
+      title: "fall signal",
+      source: "mock_wearable",
+      status: "open",
+      confidence,
+    });
+
+    expect(calculateRisk(inputFor("E004", [fall(0.8)])).riskLevel).toBe("urgent");
+    expect(calculateRisk(inputFor("E004", [fall(0.5)])).riskLevel).toBe("high_risk");
+    expect(calculateRisk(inputFor("E004", [fall(0.49)])).riskLevel).toBe("observation");
+  });
+
+  it("returns data_insufficient when wear time is below six hours", () => {
+    const result = calculateRisk(inputFor("E004", [], { wearTimeHours: 5.9 }));
+
+    expect(result.riskLevel).toBe("data_insufficient");
+    expect(result.keyReasons.join("；")).toContain("少于 6 小时");
+  });
+
+  it("compares resting heart rate rather than average heart rate", () => {
+    const averageOnly = calculateRisk(
+      inputFor("E004", [], { heartRate: 120, restingHeartRate: 68 }),
+    );
+    const elevatedResting = calculateRisk(
+      inputFor("E004", [], { heartRate: 69, restingHeartRate: 80 }),
+    );
+
+    expect(averageOnly.riskLevel).toBe("stable");
+    expect(averageOnly.triggeredRules.join("；")).not.toContain("静息基线偏高");
+    expect(elevatedResting.riskLevel).toBe("observation");
+    expect(elevatedResting.triggeredRules.join("；")).toContain("静息基线偏高");
   });
 
   it("keeps medical disclaimer and avoids diagnostic wording", () => {
@@ -204,6 +316,44 @@ describe("demoStore reducer", () => {
     expect(completedTask?.status).toBe("completed");
     expect(completedTask?.note).toContain("护工A已查看陈伯");
     expect(state.events.some((event) => event.eventType === "caregiver_completed")).toBe(true);
+  });
+
+  it("resolves every event linked to the completed offline task", () => {
+    let state = createInitialDemoState();
+    state = demoReducer(state, { type: "TRIGGER_CHEN_DIZZINESS" });
+    state = demoReducer(state, { type: "TRIGGER_SOS" });
+
+    const activeTask = state.tasks.find(
+      (task) => task.elderId === "E001" && task.status === "pending",
+    );
+    expect(activeTask).toBeTruthy();
+    expect(getRiskForElder(state, "E001").riskLevel).toBe("urgent");
+
+    state = demoReducer(state, { type: "COMPLETE_CARE_TASK" });
+    const linkedEvents = state.events.filter(
+      (event) => event.linkedTaskId === activeTask?.taskId,
+    );
+
+    expect(linkedEvents.length).toBeGreaterThanOrEqual(2);
+    expect(linkedEvents.every((event) => event.status === "resolved")).toBe(true);
+    expect(linkedEvents.every((event) => event.handledBy === "护工A")).toBe(true);
+    expect(getRiskForElder(state, "E001").riskLevel).not.toBe("urgent");
+  });
+
+  it("keeps the offline hardware fall task aligned with its 0.9 confidence", () => {
+    const state = demoReducer(createInitialDemoState(), {
+      type: "TRIGGER_HARDWARE_EVENT",
+      elderId: "E001",
+      eventType: "fall_detected",
+    });
+    const fallEvent = state.events.find(
+      (event) => event.elderId === "E001" && event.eventType === "fall_detected",
+    );
+    const task = state.tasks.find((candidate) => candidate.sourceEventId === fallEvent?.eventId);
+
+    expect(fallEvent?.payload?.confidence).toBe(0.9);
+    expect(getRiskForElder(state, "E001").riskLevel).toBe("urgent");
+    expect(task?.priority).toBe("urgent");
   });
 });
 

@@ -8,7 +8,7 @@ import { ZodError } from "zod";
 import { getDb } from "./db.js";
 import { agentRouter } from "./routes/agent.js";
 import { dashboardRouter } from "./routes/dashboard.js";
-import { demoRouter } from "./routes/demo.js";
+import { createDemoRouter } from "./routes/demo.js";
 import { eldersRouter } from "./routes/elders.js";
 import { eventsRouter } from "./routes/events.js";
 import { importRouter } from "./routes/import.js";
@@ -91,7 +91,7 @@ export function createApp(options = {}) {
   app.use("/api/import", importRouter);
   app.use("/api/agent", agentRouter);
   app.use("/api/tasks", tasksRouter);
-  app.use("/api/demo", demoRouter);
+  app.use("/api/demo", createDemoRouter({ isLoopbackRequest: requestIsLoopback }));
 
   app.use("/api", (_req, res) => {
     res.status(404).json({ ok: false, error: "API route not found." });

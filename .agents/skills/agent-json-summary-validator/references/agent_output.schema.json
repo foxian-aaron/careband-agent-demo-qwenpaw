@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://careband.local/schemas/agent_output.schema.json",
+  "title": "CareBandAgentOutput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status_level",
+    "risk_score",
+    "key_reasons",
+    "recommended_action",
+    "caregiver_summary",
+    "family_summary",
+    "institution_summary",
+    "safety_disclaimer"
+  ],
+  "properties": {
+    "status_level": {
+      "type": "string",
+      "enum": [
+        "data_insufficient",
+        "stable",
+        "observation",
+        "attention",
+        "high_risk",
+        "urgent"
+      ]
+    },
+    "risk_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "key_reasons": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "recommended_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "caregiver_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "family_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "institution_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "safety_disclaimer": {
+      "type": "string",
+      "const": "本結果僅為照護風險提示，不構成醫療診斷。"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "evidence_type": "synthetic_contract_fixture",
+  "request": {
+    "elder_id": "E001",
+    "event_type": "sos",
+    "source": "mock",
+    "occurred_at": "2026-07-11T08:00:00.000Z",
+    "payload": {
+      "action": "long_press",
+      "button_pattern": "long_press"
+    }
+  },
+  "server_assertions": {
+    "event": {
+      "event_type": "sos",
+      "source": "mock",
+      "resolved_at": null
+    },
+    "risk_result": {
+      "status_level": "urgent",
+      "risk_score": 100,
+      "key_reasons": [
+        "長者觸發 SOS 求助，需要立即確認現場狀況。"
+      ],
+      "triggered_rules": [
+        "sos => urgent"
+      ]
+    },
+    "task": {
+      "status": "open",
+      "priority": "urgent"
+    },
+    "risk_recomputed": true
+  },
+  "privacy_note": "Fictional E001 data only; no credential, precise location, raw audio, or real health export."
+}

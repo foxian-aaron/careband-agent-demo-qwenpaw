@@ -195,6 +195,8 @@ export interface CareEvent {
     nightWakeupCount?: number;
     activityDropPercent?: number;
     noResponseSeconds?: number;
+    confidence?: number;
+    fallConfidence?: number;
     note?: string;
     previousValue?: number | string;
     currentValue?: number | string;
@@ -202,7 +204,7 @@ export interface CareEvent {
     batteryLevel?: number;
     sourceType?: CareTaskSource;
   };
-  status?: "open" | "acknowledged" | "resolved";
+  status?: "open" | "acknowledged" | "resolved" | "cancelled" | "dismissed";
   linkedTaskId?: string;
   handledBy?: string;
   handledAt?: string;

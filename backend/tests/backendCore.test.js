@@ -537,6 +537,8 @@ test("urgent tasks cannot be cancelled and non-urgent cancellation closes linked
 });
 
 test("local demo reset preserves TEST001 wearable snapshots", async () => {
+  const previousAllowDemoReset = process.env.ALLOW_DEMO_RESET;
+  process.env.ALLOW_DEMO_RESET = "true";
   db.insertSnapshot({
     elder_id: "TEST001",
     date: "2026-07-11",
@@ -550,27 +552,31 @@ test("local demo reset preserves TEST001 wearable snapshots", async () => {
     data_quality: 92,
   });
 
-  await withServer(async (baseUrl) => {
-    const resetResponse = await fetch(`${baseUrl}/api/demo/reset`, { method: "POST" });
-    const dashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
-    const testSubject = dashboard.elders.find(
-      (entry) => entry.elder.elder_id === "TEST001",
-    );
-
-    assert.equal(resetResponse.status, 200);
-    assert.equal(testSubject.latest_snapshot.steps, 4321);
-    for (const entry of dashboard.elders.filter(
-      (item) => item.elder.subject_kind === "elder",
-    )) {
-      assert.equal(entry.latest_agent_output.status_level, entry.risk_result.status_level);
-      assert.equal(entry.latest_agent_output.risk_score, entry.risk_result.risk_score);
-      assert.deepEqual(entry.latest_agent_output.key_reasons, entry.risk_result.key_reasons);
-      assert.equal(
-        entry.latest_agent_output.recommended_action,
-        entry.risk_result.recommended_action,
+  try {
+    await withServer(async (baseUrl) => {
+      const resetResponse = await fetch(`${baseUrl}/api/demo/reset`, { method: "POST" });
+      const dashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
+      const testSubject = dashboard.elders.find(
+        (entry) => entry.elder.elder_id === "TEST001",
       );
-    }
-  });
+
+      assert.equal(resetResponse.status, 200);
+      assert.equal(testSubject.latest_snapshot.steps, 4321);
+      for (const entry of dashboard.elders.filter(
+        (item) => item.elder.subject_kind === "elder",
+      )) {
+        assert.equal(entry.latest_agent_output.status_level, entry.risk_result.status_level);
+        assert.equal(entry.latest_agent_output.risk_score, entry.risk_result.risk_score);
+        assert.deepEqual(entry.latest_agent_output.key_reasons, entry.risk_result.key_reasons);
+        assert.equal(
+          entry.latest_agent_output.recommended_action,
+          entry.risk_result.recommended_action,
+        );
+      }
+    });
+  } finally {
+    restoreEnv("ALLOW_DEMO_RESET", previousAllowDemoReset);
+  }
 });
 
 test("CSV preview is read-only and confirm imports idempotently with server metadata", async () => {

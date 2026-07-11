@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://careband.local/schemas/events.schema.json",
+  "title": "CareBandEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "elder_id",
+    "event_type",
+    "source",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "elder_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "type": "string",
+      "enum": ["sos", "fall", "voice", "medication", "location", "device_status", "manual_note"]
+    },
+    "source": {
+      "type": "string",
+      "enum": ["esp32", "nrf", "mobile_app", "dashboard", "csv", "mock", "wearable_api"]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "raw_text": {
+      "type": ["string", "null"]
+    },
+    "severity_hint": {
+      "type": "string",
+      "enum": ["info", "watch", "urgent", "critical"]
+    },
+    "payload": {
+      "type": "object"
+    },
+    "data_quality": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    }
+  }
+}

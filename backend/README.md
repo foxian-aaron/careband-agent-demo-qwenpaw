@@ -32,7 +32,7 @@ npm run dev
 - `QWENPAW_BASE_URL=http://127.0.0.1:8088`
 - `QWENPAW_AGENT_ID=careband_summary_agent`
 - `CORS_ORIGIN=http://127.0.0.1:5173`
-- `ALLOW_DEMO_RESET=true`（仅本地演示）
+- `ALLOW_DEMO_RESET=true`（仅本地演示；接口仍强制要求 loopback 请求）
 
 密钥只保存在本机 Provider/QwenPaw 配置或未提交的 `.env` 中。
 
@@ -64,7 +64,7 @@ SQLite 文件、上传临时文件和原始 Apple Health XML 均不得提交。
 - `POST /api/import/apple-health-xml`
 - `POST /api/agent/analyze`
 - `PATCH /api/tasks/:id`
-- `POST /api/demo/reset`（显式启用时）
+- `POST /api/demo/reset`（仅当 `ALLOW_DEMO_RESET=true` 且请求来自 loopback）
 
 `POST /api/agent/analyze` 只接收 `elder_id` 和可选 `source_event_id`；服务器自行重建快照、七日基线、有效事件和风险结果，拒绝客户端伪造风险。
 

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://careband.local/schemas/daily_snapshot.schema.json",
+  "title": "DailySnapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "elder_id",
+    "date",
+    "data_source",
+    "heart_rate_avg",
+    "resting_heart_rate",
+    "steps",
+    "active_minutes",
+    "sleep_duration",
+    "wear_time_hours",
+    "data_quality"
+  ],
+  "properties": {
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "elder_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "data_source": {
+      "type": "string",
+      "enum": ["Apple Health Export", "CSV Import", "Demo Seed", "Demo Control", "Manual Demo"]
+    },
+    "heart_rate_avg": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "resting_heart_rate": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "steps": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "active_minutes": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "sleep_duration": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 24
+    },
+    "wear_time_hours": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 24
+    },
+    "data_quality": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

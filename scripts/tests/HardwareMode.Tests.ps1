@@ -56,9 +56,11 @@ $StartDemoSource = Get-Content -Raw -LiteralPath $StartDemoPath
 Assert-Equal ($StartDemoSource -match '\$env:BACKEND_HOST = Get-CareBandBackendHost') $true 'start-demo consumes guarded backend host'
 Assert-Equal ($StartDemoSource -match '\$env:SERVE_STATIC_FRONTEND = Get-CareBandServeStaticFrontend') $true 'start-demo guards static frontend exposure'
 Assert-Equal ($StartDemoSource -match '\$env:HARDWARE_MODE = if \(\$HardwareMode\)') $true 'start-demo enables LAN route restriction'
+Assert-Equal ($StartDemoSource -match "\$env:ALLOW_DEMO_RESET = 'true'") $true 'start-demo explicitly enables loopback-gated demo reset'
 Assert-Equal ($StartDemoSource -match "\$env:AGENT_PROVIDER = 'mock'") $false 'offline Qwen remains an explicit qwenpaw-to-Mock fallback'
 
 $StartV02Source = Get-Content -Raw -LiteralPath (Join-Path $ScriptsRoot 'start-v02.mjs')
 Assert-Equal ($StartV02Source -match '"--host", "127\.0\.0\.1"') $true 'frontend remains loopback-only'
+Assert-Equal ($StartV02Source -match 'ALLOW_DEMO_RESET: process\.env\.ALLOW_DEMO_RESET \?\? "true"') $true 'npm dev explicitly enables loopback-gated demo reset'
 
 Write-Host "Hardware mode tests: $Passed passed."

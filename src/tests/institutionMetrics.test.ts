@@ -183,6 +183,14 @@ const metricsFromDemoState = (state: DemoState) =>
         taskStatus: task?.status,
         dataCompleteness: risk.dataCompleteness,
         isTeamTest: profile.subjectKind === "team_test",
+        hadHighRiskToday:
+          ["high_risk", "urgent"].includes(risk.riskLevel) ||
+          state.tasks.some(
+            (candidate) =>
+              candidate.elderId === profile.elderId &&
+              ["high", "urgent"].includes(candidate.priority) &&
+              isSameCareDay(candidate.createdAt),
+          ),
       };
     }),
   );

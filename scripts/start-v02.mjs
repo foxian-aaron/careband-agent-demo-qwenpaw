@@ -13,6 +13,7 @@ const env = {
   BACKEND_HOST: process.env.BACKEND_HOST ?? "127.0.0.1",
   SERVE_STATIC_FRONTEND: process.env.SERVE_STATIC_FRONTEND ?? "true",
   HARDWARE_MODE: process.env.HARDWARE_MODE ?? "false",
+  ALLOW_DEMO_RESET: process.env.ALLOW_DEMO_RESET ?? "true",
   CORS_ORIGIN: process.env.CORS_ORIGIN ?? "http://127.0.0.1:5173",
   VITE_API_BASE_URL: process.env.VITE_API_BASE_URL ?? "http://127.0.0.1:3001",
 };

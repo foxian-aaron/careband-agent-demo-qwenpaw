@@ -166,7 +166,7 @@ Privacy rules:
 - `POST /api/import/apple-health-xml`
 - `POST /api/agent/analyze`
 - `PATCH /api/tasks/:id`
-- `POST /api/demo/reset`（仅本机）
+- `POST /api/demo/reset`（仅当 `ALLOW_DEMO_RESET=true` 且请求来自本机 loopback）
 
 ## Validation
 
@@ -180,8 +180,9 @@ npm run build
 
 Current local validation for the real closed-loop branch:
 
-- Backend tests: 57 passed
-- Frontend tests: 71 passed
+- Backend tests: 60 passed
+- Frontend tests: 81 passed
+- Hardware-mode PowerShell tests: 14 passed
 - TypeScript: passed
 - Vite production build: passed
 - Frontend and backend npm audits: 0 known vulnerabilities
@@ -193,6 +194,7 @@ Current local validation for the real closed-loop branch:
 
 ## Key Docs
 
+- `.agents/README.md`
 - `docs/public_demo_checklist.md`
 - `docs/deployment.md`
 - `docs/agent_architecture.md`
@@ -206,4 +208,5 @@ Current local validation for the real closed-loop branch:
 - `docs/careband/demo_runbook.md`
 - `docs/careband/hardware/acceptance.md`
 - `docs/careband/browser_qa.md`
+- `docs/careband/evidence/README.md`
 - `deliverables/CareBand_v0.2_software_demo.mp4`

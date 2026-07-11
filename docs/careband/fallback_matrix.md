@@ -25,7 +25,7 @@
 
 - [x] 完整 2–3 分钟软件模拟视频，可离线播放（当前成片 2 分 13 秒，无旁白音轨）。
 - [ ] 一次真实 Agent 成功的限敏截图/录屏（只有确实成功后勾选）。
-- [ ] 一次 Agent 失败转 Mock 的截图。
-- [ ] 规范 SOS 请求与规则结果 JSON（不含密钥/真实资料）。
-- [ ] E001 固定 CSV 与导入预览截图。
-- [ ] 架构图、本矩阵和未勾选硬件验收表。
+- [x] 一次 Agent 失败转 Mock 的截图：`deliverables/screenshots/05-agent-fallback-trace.png`。
+- [x] 规范 SOS 请求与规则结果 JSON（不含密钥/真实资料）：`docs/careband/evidence/sos-request-and-rule-result.json`。
+- [x] E001 固定 CSV 与导入预览截图：`docs/careband/evidence/E001-daily-snapshots.csv`、`deliverables/screenshots/03-csv-import-history.png`。
+- [x] 架构图、本矩阵和未勾选硬件验收表：`docs/careband/architecture.md`、`docs/careband/hardware/acceptance.md`。

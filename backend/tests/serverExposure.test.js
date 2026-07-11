@@ -4,6 +4,7 @@ import { createApp } from "../src/server.js";
 
 const originalServeStaticFrontend = process.env.SERVE_STATIC_FRONTEND;
 const originalHardwareMode = process.env.HARDWARE_MODE;
+const originalAllowDemoReset = process.env.ALLOW_DEMO_RESET;
 process.env.DATABASE_PATH = ":memory:";
 process.env.AGENT_PROVIDER = "mock";
 
@@ -17,6 +18,11 @@ afterEach(() => {
     delete process.env.HARDWARE_MODE;
   } else {
     process.env.HARDWARE_MODE = originalHardwareMode;
+  }
+  if (originalAllowDemoReset === undefined) {
+    delete process.env.ALLOW_DEMO_RESET;
+  } else {
+    process.env.ALLOW_DEMO_RESET = originalAllowDemoReset;
   }
 });
 
@@ -81,5 +87,42 @@ test("hardware LAN mode exposes only health and normalized event ingestion", asy
 
     const frontendResponse = await fetch(`${baseUrl}/`);
     assert.equal(frontendResponse.status, 404);
+  }, { isLoopbackRequest: () => false });
+});
+
+test("demo reset is disabled by default even for loopback requests", async () => {
+  delete process.env.ALLOW_DEMO_RESET;
+
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/demo/reset`, { method: "POST" });
+    const body = await response.json();
+
+    assert.equal(response.status, 403);
+    assert.match(body.error, /ALLOW_DEMO_RESET=true/);
+  });
+});
+
+test("demo reset is enabled only when explicitly allowed on loopback", async () => {
+  process.env.ALLOW_DEMO_RESET = "true";
+
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/demo/reset`, { method: "POST" });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.deepEqual(body.preserved_elder_ids, ["TEST001"]);
+  });
+});
+
+test("demo reset rejects non-loopback requests even when explicitly allowed", async () => {
+  process.env.ALLOW_DEMO_RESET = "true";
+
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/demo/reset`, { method: "POST" });
+    const body = await response.json();
+
+    assert.equal(response.status, 403);
+    assert.match(body.error, /local machine/);
   }, { isLoopbackRequest: () => false });
 });

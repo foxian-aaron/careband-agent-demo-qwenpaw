@@ -14,7 +14,40 @@ export interface RiskInput {
   baseline: PersonalBaseline;
   snapshot: DailySnapshot;
   events: CareEvent[];
+  evaluationTime?: string | number | Date;
+  eventWindowHours?: number;
 }
+
+export const defaultRiskEventWindowHours = 24;
+const futureEventToleranceMs = 5 * 60 * 1000;
+const inactiveEventStatuses = new Set(["resolved", "cancelled", "dismissed"]);
+
+const toEvaluationTimestamp = (value: RiskInput["evaluationTime"]) => {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Date.parse(value);
+  return Date.now();
+};
+
+export const selectActiveRiskEvents = (
+  events: CareEvent[],
+  evaluationTime: RiskInput["evaluationTime"] = Date.now(),
+  windowHours = defaultRiskEventWindowHours,
+) => {
+  const now = toEvaluationTimestamp(evaluationTime);
+  if (!Number.isFinite(now)) return [];
+  const normalizedWindowHours = Number.isFinite(windowHours)
+    ? Math.max(1, windowHours)
+    : defaultRiskEventWindowHours;
+  const windowStart = now - normalizedWindowHours * 60 * 60 * 1000;
+  const futureLimit = now + futureEventToleranceMs;
+
+  return events.filter((event) => {
+    if (event.status && inactiveEventStatuses.has(event.status)) return false;
+    const timestamp = Date.parse(event.timestamp);
+    return Number.isFinite(timestamp) && timestamp >= windowStart && timestamp <= futureLimit;
+  });
+};
 
 const symptomKeywords = [
   "头晕",
@@ -26,6 +59,7 @@ const symptomKeywords = [
   "喘不过气",
 ];
 
+const dizzinessKeywords = ["头晕", "頭暈", "dizzy", "dizziness"];
 const severeSymptomKeywords = ["救命", "摔倒了", "胸口痛", "喘不过气", "动不了"];
 
 const clampScore = (score: number) => Math.max(0, Math.min(100, Math.round(score)));
@@ -65,6 +99,17 @@ const findSymptomEvent = (events: CareEvent[], keywords = symptomKeywords) =>
     (event) => event.eventType === "voice_symptom" && hasKeyword(event, keywords),
   );
 
+const fallConfidence = (event: CareEvent) => {
+  const raw =
+    event.confidence ??
+    event.payload?.confidence ??
+    event.payload?.fallConfidence ??
+    (event.eventType === "fall_detected" ? 1 : 0);
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return 0;
+  return numeric > 1 ? Math.min(1, numeric / 100) : Math.max(0, numeric);
+};
+
 const confidence = (snapshot: DailySnapshot, baseline: PersonalBaseline) =>
   Number(Math.min(snapshot.dataCompleteness, baseline.baselineConfidence).toFixed(2));
 
@@ -96,24 +141,33 @@ export const calculateRisk = ({
   baseline,
   snapshot,
   events,
+  evaluationTime,
+  eventWindowHours = defaultRiskEventWindowHours,
 }: RiskInput): RiskResult => {
+  const currentEvents = selectActiveRiskEvents(events, evaluationTime, eventWindowHours);
   const dimensions = createBaseDimensions(snapshot);
-  const sosEvent = events.find((event) =>
+  const sosEvent = currentEvents.find((event) =>
     ["sos", "sos_long_press", "sos_triple_press"].includes(event.eventType),
   );
-  const fallEvent = events.find((event) =>
-    ["fall_detected", "inactivity_after_fall", "no_response_after_fall"].includes(
-      event.eventType,
-    ),
-  );
-  const locationOutsideEvent = events.find(
+  const fallEvent = currentEvents
+    .filter((event) =>
+      ["fall_detected", "inactivity_after_fall", "no_response_after_fall"].includes(
+        event.eventType,
+      ),
+    )
+    .reduce<CareEvent | undefined>(
+      (highest, event) =>
+        !highest || fallConfidence(event) >= fallConfidence(highest) ? event : highest,
+      undefined,
+    );
+  const locationOutsideEvent = currentEvents.find(
     (event) =>
       ["location_alert", "geofence_exit", "wandering_help"].includes(
         event.eventType,
       ) &&
       event.payload?.safeZoneStatus === "outside",
   );
-  const severeVoiceEvent = findSymptomEvent(events, severeSymptomKeywords);
+  const severeVoiceEvent = findSymptomEvent(currentEvents, severeSymptomKeywords);
 
   if (sosEvent) {
     dimensions.safety = "high_risk";
@@ -134,30 +188,19 @@ export const calculateRisk = ({
     );
   }
 
-  if (snapshot.fallDetected || fallEvent) {
+  const detectedFallConfidence = fallEvent ? fallConfidence(fallEvent) : 0;
+  if (fallEvent && detectedFallConfidence >= 0.8) {
     dimensions.safety = "high_risk";
-    const noResponseSeconds = fallEvent?.payload?.noResponseSeconds ?? 0;
-    const isUrgent = noResponseSeconds >= 30;
     return hardResult(
       profile,
       baseline,
       snapshot,
-      isUrgent ? "urgent" : "high_risk",
-      isUrgent ? 92 : 78,
+      "urgent",
+      95,
       dimensions,
-      [
-        isUrgent
-          ? `检测到跌倒相关事件，且 ${noResponseSeconds} 秒内未确认回应`
-          : "检测到跌倒相关事件，需照护人员确认现场情况",
-      ],
-      [
-        isUrgent
-          ? "R8 跌倒事件 + 未回应升级为紧急"
-          : "R8 跌倒事件触发高风险",
-      ],
-      isUrgent
-        ? "立即通知护工和机构负责人，并按机构应急流程处理。"
-        : "请护工立即查看现场情况，并确认是否需要联系专业人员判断。",
+      [`检测到高置信度跌倒事件（${Math.round(detectedFallConfidence * 100)}%），需要立即人工确认。`],
+      ["R8 跌倒置信度不低于 0.8，进入紧急流程"],
+      "立即通知护工和机构负责人，并按机构应急流程处理。",
     );
   }
 
@@ -191,9 +234,13 @@ export const calculateRisk = ({
     );
   }
 
-  const deviceNotWornEvent = events.find((event) => event.eventType === "device_not_worn");
+  const deviceNotWornEvent = currentEvents.find(
+    (event) => event.eventType === "device_not_worn",
+  );
+  const lowWearTime =
+    typeof snapshot.wearTimeHours === "number" && snapshot.wearTimeHours < 6;
 
-  if (snapshot.dataCompleteness < 0.4 || deviceNotWornEvent) {
+  if (snapshot.dataCompleteness < 0.4 || lowWearTime || deviceNotWornEvent) {
     return {
       elderId: profile.elderId,
       riskLevel: "data_insufficient",
@@ -208,10 +255,16 @@ export const calculateRisk = ({
       keyReasons: [
         deviceNotWornEvent
           ? "设备未佩戴或佩戴状态异常，需先确认设备"
-          : "今日数据完整度不足，需先确认设备佩戴或数据同步",
+          : lowWearTime
+            ? "今日佩戴时长少于 6 小时，数据不足以判定长者状态稳定"
+            : "今日数据完整度不足，需先确认设备佩戴或数据同步",
       ],
       triggeredRules: [
-        deviceNotWornEvent ? "R1 设备未佩戴" : "R1 数据完整度低于 40%",
+        deviceNotWornEvent
+          ? "R1 设备未佩戴"
+          : lowWearTime
+            ? "R1 佩戴时长少于 6 小时"
+            : "R1 数据完整度低于 40%",
       ],
       recommendedAction:
         "请先确认设备佩戴和数据同步，再由照护人员结合现场情况判断是否需要跟进。",
@@ -219,6 +272,32 @@ export const calculateRisk = ({
       confidence: snapshot.dataCompleteness,
       medicalDisclaimer,
     };
+  }
+
+  if (fallEvent) {
+    const mediumConfidence = detectedFallConfidence >= 0.5;
+    dimensions.safety = mediumConfidence ? "high_risk" : "needs_attention";
+    return hardResult(
+      profile,
+      baseline,
+      snapshot,
+      mediumConfidence ? "high_risk" : "observation",
+      mediumConfidence ? 82 : 35,
+      dimensions,
+      [
+        mediumConfidence
+          ? `检测到中等置信度跌倒事件（${Math.round(detectedFallConfidence * 100)}%），需要尽快人工确认。`
+          : `收到低置信度跌倒信号（${Math.round(detectedFallConfidence * 100)}%），建议巡查复核。`,
+      ],
+      [
+        mediumConfidence
+          ? "R8 跌倒置信度不低于 0.5，进入高风险流程"
+          : "R8 跌倒置信度低于 0.5，进入观察流程",
+      ],
+      mediumConfidence
+        ? "请护工立即查看现场情况，并按机构流程决定是否升级处理。"
+        : "建议护工巡查复核跌倒信号，并记录人工确认结果。",
+    );
   }
 
   let score = 5;
@@ -276,17 +355,17 @@ export const calculateRisk = ({
   }
 
   if (
-    snapshot.heartRate !== null &&
-    snapshot.heartRate - baseline.restingHrBaseline >= 12
+    typeof snapshot.restingHeartRate === "number" &&
+    snapshot.restingHeartRate - baseline.restingHrBaseline >= 12
   ) {
     dimensions.vitals = "slightly_high";
     keyReasons.push(
       `当前心率较本人静息基线偏高 ${
-        snapshot.heartRate - baseline.restingHrBaseline
+        snapshot.restingHeartRate - baseline.restingHrBaseline
       } bpm`,
     );
     triggeredRules.push("心率较个人静息基线偏高");
-    score += 5;
+    score += 20;
   }
 
   if (snapshot.safeZoneStatus === "outside") {
@@ -296,7 +375,9 @@ export const calculateRisk = ({
     score += 20;
   }
 
-  const nightWakeupEvent = events.find((event) => event.eventType === "night_wakeup");
+  const nightWakeupEvent = currentEvents.find(
+    (event) => event.eventType === "night_wakeup",
+  );
   if (nightWakeupEvent) {
     dimensions.safety = "needs_attention";
     keyReasons.push(
@@ -310,7 +391,9 @@ export const calculateRisk = ({
     score += 15;
   }
 
-  const lowActivityEvent = events.find((event) => event.eventType === "low_activity");
+  const lowActivityEvent = currentEvents.find(
+    (event) => event.eventType === "low_activity",
+  );
   if (lowActivityEvent) {
     keyReasons.push(
       lowActivityEvent.payload?.activityDropPercent
@@ -321,7 +404,8 @@ export const calculateRisk = ({
     score += 5;
   }
 
-  const symptomEvent = findSymptomEvent(events);
+  const symptomEvent = findSymptomEvent(currentEvents);
+  const dizzinessEvent = findSymptomEvent(currentEvents, dizzinessKeywords);
   if (symptomEvent?.rawText) {
     keyReasons.push(`老人主动反馈：${symptomEvent.rawText}`);
     triggeredRules.push("R5 主诉症状");
@@ -339,14 +423,7 @@ export const calculateRisk = ({
   }
 
   const comboHighRisk =
-    activeDrop &&
-    snapshot.medicationEvening === "not_confirmed" &&
-    Boolean(
-      symptomEvent?.rawText &&
-        ["头晕", "不舒服", "胸闷"].some((keyword) =>
-          symptomEvent.rawText?.includes(keyword),
-        ),
-    );
+    snapshot.medicationEvening === "not_confirmed" && Boolean(dizzinessEvent);
 
   if (comboHighRisk) {
     triggeredRules.push("R7 组合高风险");

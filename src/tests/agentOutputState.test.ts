@@ -81,6 +81,30 @@ describe("dashboard Agent output selection", () => {
     expect(current.run?.fallbackUsed).toBe(false);
   });
 
+  it.each(["fallback_valid", "failed"] as const)(
+    "preserves the requested QwenPaw provider for a Mock %s run with no output",
+    (validationStatus) => {
+      const current = resolveDashboardAgentState(null, {
+        run_id: `RUN-${validationStatus}`,
+        elder_id: "E001",
+        source_event_id: "EVT-NEW",
+        provider: "mock",
+        requested_provider: "qwenpaw",
+        model: "deterministic-mock-v0.2",
+        duration_ms: 25,
+        validation_status: validationStatus,
+        fallback_used: true,
+        error_reason: "QwenPaw unavailable",
+        created_at: "2026-07-11T10:05:00.000Z",
+      });
+
+      expect(current.output).toBeNull();
+      expect(current.run?.requestedProvider).toBe("qwenpaw");
+      expect(current.run?.hasCurrentOutput).toBe(false);
+      expect(current.run?.fallbackUsed).toBe(true);
+    },
+  );
+
   it("replaces a stale current summary with an explicit local fallback after a request failure", () => {
     const initial = createInitialDemoState();
     initial.agentOutputs.E001 = {
