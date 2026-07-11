@@ -11,6 +11,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "test:backend": "cd backend && node --test tests/*.test.js",
+    "test:hardware-mode": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/HardwareMode.Tests.ps1",
+    "verify:browser": "node scripts/verify-browser-demo-three-runs.mjs",
     "seed:reset": "cd backend && node scripts/resetDemoData.js",
     "check:public": "node scripts/check-public-demo.mjs"
   },

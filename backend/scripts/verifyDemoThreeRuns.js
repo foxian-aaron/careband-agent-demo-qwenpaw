@@ -24,15 +24,25 @@ const request = async (path, init = {}) => {
 const postJson = (path, body) =>
   request(path, { method: "POST", body: JSON.stringify(body) });
 
+const waitForAgentOutput = async (elderId, sourceEventId) => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const dashboard = await request("/api/dashboard");
+    const elder = dashboard.elders.find((entry) => entry.elder.elder_id === elderId);
+    if (elder?.latest_agent_output?.source_event_id === sourceEventId) return elder;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for Agent output for ${sourceEventId}`);
+};
+
 const demoCsv = [
   "elder_id,date,data_source,heart_rate_avg,resting_heart_rate,steps,active_minutes,sleep_duration,wear_time_hours,data_quality",
-  "E001,2026-07-01,CSV,74,67,2280,44,6.8,19,85",
-  "E001,2026-07-02,CSV,75,67,2110,40,6.4,18,85",
-  "E001,2026-07-03,CSV,73,66,2360,46,6.7,19,85",
-  "E001,2026-07-04,CSV,77,68,1980,35,6.3,17,85",
-  "E001,2026-07-05,CSV,79,69,1620,30,5.7,16,85",
-  "E001,2026-07-06,CSV,82,70,1140,24,5.1,15,85",
-  "E001,2026-07-07,CSV,86,72,820,18,4.8,15,85",
+  "E001,2026-07-01,CSV Import,74,67,2280,44,6.8,19,85",
+  "E001,2026-07-02,CSV Import,75,67,2110,40,6.4,18,85",
+  "E001,2026-07-03,CSV Import,73,66,2360,46,6.7,19,85",
+  "E001,2026-07-04,CSV Import,77,68,1980,35,6.3,17,85",
+  "E001,2026-07-05,CSV Import,79,69,1620,30,5.7,16,85",
+  "E001,2026-07-06,CSV Import,82,70,1140,24,5.1,15,85",
+  "E001,2026-07-07,CSV Import,86,72,820,18,4.8,15,85",
 ].join("\n");
 
 const importDemoCsv = async () => {
@@ -79,14 +89,12 @@ try {
 
     assert.equal(riskEvent.risk_result.status_level, "urgent");
     assert.ok(riskEvent.task?.task_id);
+    assert.equal(riskEvent.agent_dispatch.status, "queued");
 
-    const agent = await postJson("/api/agent/analyze", {
-      elder_id: "E001",
-      source_event_id: riskEvent.event.event_id,
-    });
-    assert.equal(agent.agent_result.status_level, "urgent");
-    assert.equal(agent.meta.provider, "mock");
-    assert.equal(agent.meta.validation_status, "valid");
+    const hardwareAgentElder = await waitForAgentOutput("E001", riskEvent.event.event_id);
+    assert.equal(hardwareAgentElder.latest_agent_output.status_level, "urgent");
+    assert.equal(hardwareAgentElder.latest_agent_run.provider, "mock");
+    assert.equal(hardwareAgentElder.latest_agent_run.validation_status, "valid");
 
     for (const status of ["acknowledged", "in_progress"]) {
       await request(`/api/tasks/${riskEvent.task.task_id}`, {
@@ -112,12 +120,34 @@ try {
     });
     assert.equal(resolved.task.status, "resolved");
 
+    const staleDashboard = await request("/api/dashboard");
+    const staleElder = staleDashboard.elders.find(
+      (entry) => entry.elder.elder_id === "E001",
+    );
+    assert.equal(staleElder.latest_agent_output, null);
+    assert.equal(staleElder.latest_agent_output_stale, true);
+
+    const completionEvent = await postJson("/api/events", {
+      elder_id: "E001",
+      event_type: "manual_note",
+      source: "dashboard",
+      occurred_at: new Date().toISOString(),
+      raw_text: "Synthetic caregiver follow-up completed.",
+      payload: { action: "caregiver_completed", note: "Synthetic follow-up completed." },
+    });
+    const finalAgent = await postJson("/api/agent/analyze", {
+      elder_id: "E001",
+      source_event_id: completionEvent.event.event_id,
+    });
+    assert.equal(finalAgent.meta.provider, "mock");
+    assert.equal(finalAgent.meta.validation_status, "valid");
+
     const dashboard = await request("/api/dashboard");
     const elder = dashboard.elders.find((entry) => entry.elder.elder_id === "E001");
     assert.ok(elder);
     assert.equal(elder.active_events.some((event) => event.event_id === riskEvent.event.event_id), false);
     assert.equal(["urgent", "high_risk"].includes(elder.risk_result.status_level), false);
-    assert.equal(elder.latest_agent_output.output_id, agent.output_id);
+    assert.equal(elder.latest_agent_output.output_id, finalAgent.output_id);
 
     results.push({
       run,
@@ -125,8 +155,8 @@ try {
       initial_risk: riskEvent.risk_result.status_level,
       final_risk: elder.risk_result.status_level,
       task_status: resolved.task.status,
-      agent_provider: agent.meta.provider,
-      validation_status: agent.meta.validation_status,
+      agent_provider: finalAgent.meta.provider,
+      validation_status: finalAgent.meta.validation_status,
       csv_quality: 85,
       csv_idempotent: true,
     });

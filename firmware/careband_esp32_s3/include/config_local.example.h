@@ -4,7 +4,7 @@
 // Never commit a real SSID, password, token, or production endpoint.
 #define CAREBAND_WIFI_SSID "REPLACE_WITH_DEMO_WIFI"
 #define CAREBAND_WIFI_PASSWORD "REPLACE_WITH_DEMO_WIFI_PASSWORD"
-#define CAREBAND_EVENTS_URL "http://192.168.1.100:8787/api/events"
+#define CAREBAND_EVENTS_URL "http://192.168.1.100:3001/api/events"
 
 #define CAREBAND_DEVICE_ID "careband-proto-001"
 #define CAREBAND_ELDER_ID "E001"

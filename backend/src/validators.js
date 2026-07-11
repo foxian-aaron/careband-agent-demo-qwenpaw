@@ -1,16 +1,16 @@
 import { z } from "zod";
 
-const nullableNumber = z.preprocess((value) => {
+const nullableNumber = (numberSchema = z.number()) => z.preprocess((value) => {
   if (value === "" || value === undefined || value === null) return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : value;
-}, z.number().nullable());
+}, numberSchema.nullable());
 
-const nullableInteger = z.preprocess((value) => {
+const nullableInteger = (numberSchema = z.number().int()) => z.preprocess((value) => {
   if (value === "" || value === undefined || value === null) return null;
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? Math.round(numeric) : value;
-}, z.number().int().nullable());
+  return Number.isFinite(numeric) ? numeric : value;
+}, numberSchema.nullable());
 
 const dataQualityNumber = z.preprocess((value) => {
   if (value === "" || value === undefined || value === null) return undefined;
@@ -18,19 +18,40 @@ const dataQualityNumber = z.preprocess((value) => {
   return Number.isFinite(numeric) ? numeric : value;
 }, z.number().min(0).max(100));
 
+const validLocalDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "date must use YYYY-MM-DD")
+  .refine((value) => {
+    const [year, month, day] = value.split("-").map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === month - 1 &&
+      parsed.getUTCDate() === day
+    );
+  }, "date must be a real calendar date");
+
+export const SNAPSHOT_SOURCES = [
+  "Apple Health Export",
+  "CSV Import",
+  "Demo Seed",
+  "Demo Control",
+  "Manual Demo",
+];
+
 export const snapshotSchema = z.object({
   snapshot_id: z.string().optional(),
   elder_id: z.string().min(1),
-  date: z.string().min(8),
-  data_source: z.string().min(1).default("Manual Demo"),
-  heart_rate_avg: nullableNumber.optional().default(null),
-  resting_heart_rate: nullableNumber.optional().default(null),
-  steps: nullableInteger.optional().default(null),
-  active_minutes: nullableNumber.optional().default(null),
-  sleep_duration: nullableNumber.optional().default(null),
-  wear_time_hours: nullableNumber.optional().default(null),
+  date: validLocalDate,
+  data_source: z.enum(SNAPSHOT_SOURCES).default("Manual Demo"),
+  heart_rate_avg: nullableNumber(z.number().min(0)).optional().default(null),
+  resting_heart_rate: nullableNumber(z.number().min(0)).optional().default(null),
+  steps: nullableInteger(z.number().int().min(0)).optional().default(null),
+  active_minutes: nullableNumber(z.number().min(0)).optional().default(null),
+  sleep_duration: nullableNumber(z.number().min(0).max(24)).optional().default(null),
+  wear_time_hours: nullableNumber(z.number().min(0).max(24)).optional().default(null),
   data_quality: dataQualityNumber,
-  created_at: z.string().optional(),
+  created_at: z.string().datetime({ offset: true }).optional(),
 });
 
 export const EVENT_TYPES = [
@@ -46,7 +67,6 @@ export const EVENT_TYPES = [
 export const EVENT_SOURCES = [
   "esp32",
   "nrf",
-  "ai_glasses",
   "mobile_app",
   "dashboard",
   "csv",
@@ -100,6 +120,7 @@ const legacyEventMap = {
 
 const sourceAliases = {
   demo: "mock",
+  demo_control: "dashboard",
   hardware_simulator: "mock",
   voice_simulator: "mock",
   mock_wearable: "mock",
@@ -108,6 +129,254 @@ const sourceAliases = {
   web: "dashboard",
   wearable: "wearable_api",
   hardware: "esp32",
+};
+
+const commonPayloadKeys = [
+  "action",
+  "device_id",
+  "simulated_device",
+  "original_source",
+  "original_event_type",
+];
+
+const eventPayloadKeys = {
+  sos: [
+    ...commonPayloadKeys,
+    "button_pattern",
+    "button_press_seconds",
+    "device_uptime_ms",
+    "retry_storage",
+    "battery_pct",
+    "battery_level",
+    "firmware_version",
+  ],
+  fall: [
+    ...commonPayloadKeys,
+    "confidence",
+    "fall_confidence",
+    "no_response_seconds",
+  ],
+  voice: [...commonPayloadKeys, "transcript_summary", "symptom_keywords", "language"],
+  medication: [
+    ...commonPayloadKeys,
+    "medication_name",
+    "scheduled_time",
+    "confirmation_source",
+    "button_pattern",
+  ],
+  location: [...commonPayloadKeys, "location_zone", "region", "safe_zone_status"],
+  device_status: [
+    ...commonPayloadKeys,
+    "battery_pct",
+    "battery_level",
+    "wear_time_hours",
+    "night_wakeup_count",
+    "activity_drop_percent",
+    "previous_value",
+    "current_value",
+  ],
+  manual_note: [
+    ...commonPayloadKeys,
+    "note",
+    "source_type",
+    "previous_value",
+    "current_value",
+  ],
+};
+
+const compactText = (value, maxLength) =>
+  String(value ?? "")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, maxLength);
+
+const limitedString = (maxLength) => z.string().trim().min(1).max(maxLength);
+const nonNegativeNumber = z.number().finite().min(0);
+const percentage = z.number().finite().min(0).max(100);
+const batteryLevel = z.union([percentage, limitedString(32)]);
+const LOCATION_ZONES = ["A 区", "B 区", "C 区", "机构内", "机构外", "澳门"];
+const locationZoneAliases = new Map([
+  ["a区", "A 区"],
+  ["a區", "A 区"],
+  ["zone_a", "A 区"],
+  ["b区", "B 区"],
+  ["b區", "B 区"],
+  ["zone_b", "B 区"],
+  ["c区", "C 区"],
+  ["c區", "C 区"],
+  ["zone_c", "C 区"],
+  ["机构内", "机构内"],
+  ["機構內", "机构内"],
+  ["care_center", "机构内"],
+  ["机构外", "机构外"],
+  ["機構外", "机构外"],
+  ["outside_center", "机构外"],
+  ["澳门", "澳门"],
+  ["澳門", "澳门"],
+]);
+const safeZoneAliases = new Map([
+  ["inside", "inside"],
+  ["outside", "outside"],
+  ["unknown", "unknown"],
+  ["内", "inside"],
+  ["內", "inside"],
+  ["外", "outside"],
+]);
+const boundedScalar = z.union([
+  z.string().max(160),
+  z.number().finite(),
+  z.boolean(),
+  z.null(),
+]);
+const commonPayloadShape = {
+  action: limitedString(64).optional(),
+  device_id: limitedString(80).optional(),
+  simulated_device: limitedString(32).optional(),
+  original_source: limitedString(64).optional(),
+  original_event_type: limitedString(64).optional(),
+};
+
+const eventPayloadSchemas = {
+  sos: z
+    .object({
+      ...commonPayloadShape,
+      button_pattern: limitedString(64).optional(),
+      button_press_seconds: nonNegativeNumber.max(300).optional(),
+      device_uptime_ms: nonNegativeNumber.max(Number.MAX_SAFE_INTEGER).optional(),
+      retry_storage: limitedString(32).optional(),
+      battery_pct: percentage.optional(),
+      battery_level: batteryLevel.optional(),
+      firmware_version: limitedString(32).optional(),
+    })
+    .strict(),
+  fall: z
+    .object({
+      ...commonPayloadShape,
+      confidence: percentage.optional(),
+      fall_confidence: percentage.optional(),
+      no_response_seconds: nonNegativeNumber.max(86400).optional(),
+    })
+    .strict(),
+  voice: z
+    .object({
+      ...commonPayloadShape,
+      transcript_summary: limitedString(160).optional(),
+      symptom_keywords: z.array(limitedString(32)).max(12).optional(),
+      language: limitedString(32).optional(),
+    })
+    .strict(),
+  medication: z
+    .object({
+      ...commonPayloadShape,
+      medication_name: limitedString(80).optional(),
+      scheduled_time: limitedString(64).optional(),
+      confirmation_source: limitedString(64).optional(),
+      button_pattern: limitedString(64).optional(),
+    })
+    .strict(),
+  location: z
+    .object({
+      ...commonPayloadShape,
+      location_zone: z.enum(LOCATION_ZONES).optional(),
+      safe_zone_status: z.enum(["inside", "outside", "unknown"]).optional(),
+    })
+    .strict(),
+  device_status: z
+    .object({
+      ...commonPayloadShape,
+      battery_pct: percentage.optional(),
+      battery_level: batteryLevel.optional(),
+      wear_time_hours: nonNegativeNumber.max(24).optional(),
+      night_wakeup_count: z.number().int().min(0).max(1000).optional(),
+      activity_drop_percent: percentage.optional(),
+      previous_value: boundedScalar.optional(),
+      current_value: boundedScalar.optional(),
+    })
+    .strict(),
+  manual_note: z
+    .object({
+      ...commonPayloadShape,
+      note: limitedString(1000).optional(),
+      source_type: limitedString(64).optional(),
+      previous_value: boundedScalar.optional(),
+      current_value: boundedScalar.optional(),
+    })
+    .strict(),
+};
+
+const payloadStringLimits = {
+  action: 64,
+  device_id: 80,
+  simulated_device: 32,
+  original_source: 64,
+  original_event_type: 64,
+  button_pattern: 64,
+  retry_storage: 32,
+  firmware_version: 32,
+  transcript_summary: 160,
+  language: 32,
+  medication_name: 80,
+  scheduled_time: 64,
+  confirmation_source: 64,
+  location_zone: 80,
+  region: 80,
+  safe_zone_status: 32,
+  note: 1000,
+  source_type: 64,
+};
+
+const pickPayload = (eventType, inputPayload) => {
+  const allowed = new Set(eventPayloadKeys[eventType] ?? commonPayloadKeys);
+  return Object.fromEntries(
+    Object.entries(inputPayload).filter(([key, value]) => allowed.has(key) && value !== undefined),
+  );
+};
+
+const sanitizePayload = (eventType, inputPayload) => {
+  const schema = eventPayloadSchemas[eventType];
+  if (!schema) return {};
+
+  const picked = pickPayload(eventType, inputPayload);
+  const sanitized = {};
+  for (const [key, originalValue] of Object.entries(picked)) {
+    let value = originalValue;
+    const stringLimit = payloadStringLimits[key];
+    if (stringLimit) {
+      if (typeof value !== "string") continue;
+      value = compactText(value, stringLimit);
+      if (!value) continue;
+    } else if (key === "symptom_keywords") {
+      if (!Array.isArray(value)) continue;
+      value = [
+        ...new Set(
+          value
+            .filter((item) => typeof item === "string")
+            .map((item) => compactText(item, 32))
+            .filter(Boolean),
+        ),
+      ].slice(0, 12);
+      if (value.length === 0) continue;
+    } else if (["previous_value", "current_value"].includes(key) && typeof value === "string") {
+      value = compactText(value, 160);
+    }
+
+    const fieldSchema = schema.shape[key];
+    const parsed = fieldSchema?.safeParse(value);
+    if (parsed?.success && parsed.data !== undefined) sanitized[key] = parsed.data;
+  }
+
+  return schema.parse(sanitized);
+};
+
+const normalizeLocationZone = (value) => {
+  if (typeof value !== "string") return null;
+  const key = compactText(value, 80).toLowerCase().replace(/\s+/gu, "");
+  return locationZoneAliases.get(key) ?? null;
+};
+
+const normalizeSafeZoneStatus = (value) => {
+  if (typeof value !== "string") return null;
+  return safeZoneAliases.get(compactText(value, 32).toLowerCase()) ?? null;
 };
 
 const defaultSeverity = (eventType, action, payload) => {
@@ -130,21 +399,56 @@ export const normalizeEventInput = (input) => {
   const rawSource = String(input?.source ?? "mock");
   const sourceCandidate = sourceAliases[rawSource] ?? rawSource;
   const source = sourceCandidate;
-  const payload = { ...(input?.payload ?? {}) };
+  const rawPayload =
+    input?.payload && typeof input.payload === "object" && !Array.isArray(input.payload)
+      ? { ...input.payload }
+      : {};
 
-  if (!payload.action && mappedAction) payload.action = mappedAction;
-  if (!payload.action && eventType === "sos") payload.action = "triggered";
-  if (eventType === "fall" && legacyType === "fall_detected" && payload.confidence == null) {
-    payload.confidence = 1;
+  if (!rawPayload.action && mappedAction) rawPayload.action = mappedAction;
+  if (!rawPayload.action && eventType === "sos") rawPayload.action = "triggered";
+  if (eventType === "fall" && legacyType === "fall_detected" && rawPayload.confidence == null) {
+    rawPayload.confidence = 1;
   }
-  if (rawSource !== source && !payload.original_source) payload.original_source = rawSource;
+  if (rawSource !== source && !rawPayload.original_source) rawPayload.original_source = rawSource;
   if (
     legacyEventMap[legacyType] &&
     eventType === "manual_note" &&
     legacyType !== "manual_note" &&
-    !payload.original_event_type
+    !rawPayload.original_event_type
   ) {
-    payload.original_event_type = legacyType;
+    rawPayload.original_event_type = legacyType;
+  }
+  if (eventType === "location") {
+    const locationZone = normalizeLocationZone(rawPayload.location_zone ?? rawPayload.region);
+    const safeZoneStatus = normalizeSafeZoneStatus(rawPayload.safe_zone_status);
+    delete rawPayload.region;
+    if (locationZone) rawPayload.location_zone = locationZone;
+    else delete rawPayload.location_zone;
+    if (safeZoneStatus) rawPayload.safe_zone_status = safeZoneStatus;
+    else delete rawPayload.safe_zone_status;
+  }
+
+  const payload = sanitizePayload(eventType, rawPayload);
+  let rawText =
+    typeof input?.raw_text === "string"
+      ? compactText(input.raw_text, eventType === "manual_note" ? 1000 : 500) || null
+      : null;
+
+  if (eventType === "voice") {
+    const summaryCandidate = [rawPayload.transcript_summary, input?.raw_text, rawPayload.transcript]
+      .find((value) => typeof value === "string");
+    const transcriptSummary = compactText(
+      summaryCandidate,
+      160,
+    );
+    if (transcriptSummary) payload.transcript_summary = transcriptSummary;
+    rawText = transcriptSummary || null;
+  } else if (eventType === "location") {
+    const region = payload.location_zone ?? "";
+    const safeZone = payload.safe_zone_status ?? "";
+    rawText = `Location region event: ${region || "withheld"}; safe_zone_status=${
+      safeZone || "unknown"
+    }`;
   }
 
   return {
@@ -152,6 +456,7 @@ export const normalizeEventInput = (input) => {
     event_type: eventType,
     occurred_at: input?.occurred_at ?? input?.timestamp,
     source,
+    raw_text: rawText,
     severity_hint:
       input?.severity_hint ?? defaultSeverity(eventType, payload.action, payload),
     data_quality: input?.data_quality ?? "medium",
@@ -173,7 +478,10 @@ export const eventSchema = z.preprocess(
     payload: z.record(z.unknown()),
     data_quality: z.enum(["high", "medium", "low"]),
     created_at: z.string().datetime({ offset: true }).optional(),
-  }),
+  }).transform((event) => ({
+    ...event,
+    payload: eventPayloadSchemas[event.event_type].parse(event.payload),
+  })),
 );
 
 export const taskPatchSchema = z.preprocess(

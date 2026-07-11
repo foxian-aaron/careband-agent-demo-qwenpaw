@@ -1,6 +1,6 @@
 # 智護環 CareBand Agent Demo v0.2
 
-## 2026-07-11 本地真实闭环
+## 2026-07-11 本地软件真实闭环
 
 当前主链路已经锁定为：
 
@@ -26,6 +26,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-demo.ps1
 cd backend
 npm run smoke:qwenpaw
 ```
+
+默认启动把前端和后端都限制在 `127.0.0.1`。只有连接实体 ESP32 时才显式启用局域网硬件模式：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-demo.ps1 -HardwareMode
+```
+
+硬件模式仍让前端只监听 `127.0.0.1`，仅将后端绑定到 `0.0.0.0:3001`，并在终端打印 ESP32 可用的 `http://<电脑局域网IP>:3001/api/events` 候选地址。选择与开发板同一网段的地址填入被 Git 忽略的 `config_local.h`。该原型接口没有设备认证或 TLS，只能临时用于可信私有局域网；不要配置公网端口转发，Windows 防火墙提示时只允许专用网络。
 
 本分支只用于本地比赛演示，不包含 GitHub push、PR、公网部署、真实长者数据、真实录音或医疗能力。
 
@@ -172,15 +180,15 @@ npm run build
 
 Current local validation for the real closed-loop branch:
 
-- Backend tests: 49 passed
-- Frontend tests: 64 passed
+- Backend tests: 57 passed
+- Frontend tests: 71 passed
 - TypeScript: passed
 - Vite production build: passed
 - Frontend and backend npm audits: 0 known vulnerabilities
 - ESP32 native button, queue, HTTP and identity tests: 11 passed
 - ESP32-S3 DevKitC-1 firmware build: passed
-- Three consecutive software demo runs: passed with labelled Mock fallback
-- Real QwenPaw request path: wired and validated; requires a current Alibaba model credential to replace fallback locally
+- Three consecutive API/SQLite demo runs and three consecutive browser UI runs: passed with labelled Mock fallback
+- QwenPaw provider bridge and fake-SSE tests: passed; the live Alibaba call currently returns 401 and still requires a refreshed credential
 - No public deployment or GitHub push is part of this branch
 
 ## Key Docs

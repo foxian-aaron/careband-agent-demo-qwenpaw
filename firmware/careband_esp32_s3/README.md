@@ -19,6 +19,8 @@
 
 未创建本地配置时仍可编译，但会使用不可连接的占位值，不能用于现场演示。
 
+实体板联网前，从项目根目录运行 `powershell -ExecutionPolicy Bypass -File .\scripts\start-demo.ps1 -HardwareMode`。脚本打印的局域网 `http://<电脑IP>:3001/api/events` 才能填入本地 `CAREBAND_EVENTS_URL`；默认启动模式只监听本机，ESP32 无法连接。硬件模式没有设备认证或 TLS，只能在可信私有局域网中临时使用，不得做公网端口转发。
+
 ## 编译与测试
 
 ```powershell

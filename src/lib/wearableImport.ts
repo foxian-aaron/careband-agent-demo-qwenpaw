@@ -8,18 +8,18 @@ import type { BackendSnapshot } from "./apiClient";
 import { apiDataQualityToRatio } from "./dataQuality";
 
 export const wearableCsvExample = `elder_id,date,data_source,heart_rate_avg,resting_heart_rate,steps,active_minutes,sleep_duration,wear_time_hours,data_quality
-E001,2026-07-01,CSV,76,68,2100,38,6.4,18,85
-E001,2026-07-02,CSV,78,,1980,35,6.1,17,80
-E001,2026-07-03,CSV,86,72,820,18,4.8,15,72`;
+E001,2026-07-01,CSV Import,76,68,2100,38,6.4,18,85
+E001,2026-07-02,CSV Import,78,,1980,35,6.1,17,80
+E001,2026-07-03,CSV Import,86,72,820,18,4.8,15,72`;
 
 export const chenWearableSevenDayCsv = `elder_id,date,data_source,heart_rate_avg,resting_heart_rate,steps,active_minutes,sleep_duration,wear_time_hours,data_quality
-E001,2026-06-04,CSV,74,67,2280,44,6.8,19,88
-E001,2026-06-05,CSV,75,67,2110,40,6.4,18,85
-E001,2026-06-06,CSV,73,66,2360,46,6.7,19,88
-E001,2026-06-07,CSV,77,68,1980,35,6.3,17,82
-E001,2026-06-08,CSV,79,69,1620,30,5.7,16,78
-E001,2026-06-09,CSV,82,70,1140,24,5.1,15,74
-E001,2026-06-10,CSV,86,72,820,18,4.8,15,72`;
+E001,2026-06-04,CSV Import,74,67,2280,44,6.8,19,88
+E001,2026-06-05,CSV Import,75,67,2110,40,6.4,18,85
+E001,2026-06-06,CSV Import,73,66,2360,46,6.7,19,88
+E001,2026-06-07,CSV Import,77,68,1980,35,6.3,17,82
+E001,2026-06-08,CSV Import,79,69,1620,30,5.7,16,78
+E001,2026-06-09,CSV Import,82,70,1140,24,5.1,15,74
+E001,2026-06-10,CSV Import,86,72,820,18,4.8,15,72`;
 
 const parseNullableNumber = (value: string): number | null => {
   if (!value.trim()) return null;

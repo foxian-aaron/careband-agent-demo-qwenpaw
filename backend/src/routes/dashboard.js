@@ -20,6 +20,7 @@ const toPublicAgentRunMeta = (run) =>
         run_id: run.run_id,
         source_event_id: run.source_event_id,
         provider: run.provider,
+        requested_provider: run.requested_provider,
         model: run.model,
         started_at: run.started_at,
         duration_ms: run.duration_ms,
@@ -29,6 +30,13 @@ const toPublicAgentRunMeta = (run) =>
       }
     : null;
 
+const agentOutputMatchesRisk = (output, risk) =>
+  Boolean(output) &&
+  output.status_level === risk.status_level &&
+  Number(output.risk_score) === Number(risk.risk_score) &&
+  output.recommended_action === risk.recommended_action &&
+  JSON.stringify(output.key_reasons ?? []) === JSON.stringify(risk.key_reasons ?? []);
+
 dashboardRouter.get("/", (_req, res) => {
   const elders = listElders().map((elder) => {
     const snapshot = getLatestSnapshot(elder.elder_id);
@@ -36,6 +44,8 @@ dashboardRouter.get("/", (_req, res) => {
     const events = getEventsForElder(elder.elder_id);
     const activeEvents = getActiveEventsForElder(elder.elder_id);
     const riskResult = evaluateRisk({ elder, snapshot, baseline, events: activeEvents });
+    const latestAgentOutput = getLatestAgentOutput(elder.elder_id);
+    const agentOutputIsCurrent = agentOutputMatchesRisk(latestAgentOutput, riskResult);
 
     return {
       elder,
@@ -46,8 +56,11 @@ dashboardRouter.get("/", (_req, res) => {
       active_events: activeEvents,
       risk_result: riskResult,
       tasks: getTasksForElder(elder.elder_id),
-      latest_agent_output: getLatestAgentOutput(elder.elder_id),
-      latest_agent_run: toPublicAgentRunMeta(getLatestAgentRun(elder.elder_id)),
+      latest_agent_output: agentOutputIsCurrent ? latestAgentOutput : null,
+      latest_agent_run: agentOutputIsCurrent
+        ? toPublicAgentRunMeta(getLatestAgentRun(elder.elder_id))
+        : null,
+      latest_agent_output_stale: Boolean(latestAgentOutput) && !agentOutputIsCurrent,
     };
   });
 

@@ -16,7 +16,7 @@
 
 ## 连续三轮
 
-自动软件回归已于 2026-07-11 使用 `backend/scripts/verifyDemoThreeRuns.js` 连续通过三轮，覆盖 CSV/85、幂等重导、SOS→urgent、Agent Mock 校验、任务 resolved；浏览器完整 UI 闭环另见 `browser_qa.md`。下表仍保留未勾选，供主讲人进行三轮人工现场排练，不能用自动测试替代。
+自动 API/SQLite 回归已于 2026-07-11 使用 `backend/scripts/verifyDemoThreeRuns.js` 连续通过三轮，覆盖 CSV/85、幂等重导、SOS→urgent、Agent Mock 校验、任务 resolved。真实浏览器自动化也已连续通过 3/3 轮完整 UI 闭环，详见 `browser_qa.md`。下表仍保留未勾选，供主讲人进行三轮人工现场排练，不能用自动测试替代。
 
 | 轮次 | 机构→E001 | CSV/85% | SOS | urgent | Agent/Mock 标签 | 任务 resolved | 家属更新 | ≤180s | 阻断/备注 |
 | ---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | --- |

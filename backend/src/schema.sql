@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   elder_id TEXT NOT NULL,
   source_event_id TEXT,
   provider TEXT NOT NULL,
+  requested_provider TEXT NOT NULL DEFAULT 'mock',
   model TEXT,
   started_at TEXT NOT NULL,
   duration_ms INTEGER,

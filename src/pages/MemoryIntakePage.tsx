@@ -7,6 +7,7 @@ import {
   chenMemorySample,
   createMockInitialCareMemoryDraft,
 } from "../lib/memoryExtractor";
+import { isMemoryDraftFullyReviewed } from "../lib/memoryConfirmation";
 import { useDemo } from "../store/demoStore";
 import type { MemorySourceType } from "../types";
 
@@ -32,6 +33,7 @@ export const MemoryIntakePage = ({ elderId }: MemoryIntakePageProps) => {
   const [input, setInput] = useState(chenMemorySample);
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(Boolean(savedMemory));
+  const canSave = draft ? isMemoryDraftFullyReviewed(draft) : false;
 
   const generateDraft = async () => {
     setLoading(true);
@@ -94,6 +96,7 @@ export const MemoryIntakePage = ({ elderId }: MemoryIntakePageProps) => {
             </div>
             <button
               className="primary"
+              disabled={!canSave}
               onClick={() => {
                 dispatch({ type: "SAVE_INITIAL_CARE_MEMORY", elderId: profile.elderId });
                 setSaved(true);
@@ -101,6 +104,11 @@ export const MemoryIntakePage = ({ elderId }: MemoryIntakePageProps) => {
             >
               保存到老人初始照护记忆
             </button>
+            {!canSave ? (
+              <p className="trace-disclaimer">
+                保存前必须逐条选择“确认”或“删除/拒绝”；待确认和需补充条目不会进入正式照护记忆。
+              </p>
+            ) : null}
             {saved ? (
               <p className="trace-disclaimer">
                 已保存。返回驾驶舱后会显示：初始照护记忆已建立、动态状态基线建立中，以及高血压关注、跌倒风险关注、晚药易漏、粤语优先、夜间离床关注等标签。

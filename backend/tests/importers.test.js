@@ -29,7 +29,7 @@ test("CSV importer parses daily snapshot rows", () => {
 test("CSV importer keeps missing wearable metrics as null", () => {
   const csv = [
     "elder_id,date,data_source,heart_rate_avg,resting_heart_rate,steps,active_minutes,sleep_duration,wear_time_hours,data_quality",
-    "E001,2026-06-20,CSV,84,,980,,,18.2,85",
+    "E001,2026-06-20,CSV Import,84,,980,,,18.2,85",
   ].join("\n");
 
   const [row] = parseDailySnapshotsCsv(csv);
@@ -58,7 +58,7 @@ test("CSV importer can apply server-controlled elder and source metadata", () =>
 test("CSV importer rejects a blank data_quality instead of coercing it to zero", () => {
   const csv = [
     "elder_id,date,data_source,heart_rate_avg,resting_heart_rate,steps,active_minutes,sleep_duration,wear_time_hours,data_quality",
-    "E001,2026-06-20,CSV,84,70,980,20,6.2,18.2,",
+    "E001,2026-06-20,CSV Import,84,70,980,20,6.2,18.2,",
   ].join("\n");
 
   assert.throws(() => parseDailySnapshotsCsv(csv), /CSV/);

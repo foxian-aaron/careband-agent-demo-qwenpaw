@@ -4,6 +4,7 @@ import {
   mapRecentSnapshotsToTrend,
   parseWearableCsv,
 } from "../lib/wearableImport";
+import { createInitialDemoState, demoReducer } from "../store/demoStore";
 
 describe("wearable snapshot normalization", () => {
   it("maps backend percentages to UI ratios while preserving missing metrics", () => {
@@ -76,5 +77,46 @@ describe("wearable snapshot normalization", () => {
       steps: null,
       riskLevel: "data_insufficient",
     });
+  });
+
+  it("does not temporarily replace the server latest snapshot with an older confirmed CSV", () => {
+    const initial = createInitialDemoState();
+    const serverLatest = initial.snapshots.E001;
+    const olderImport = mapBackendSnapshotToWearable({
+      snapshot_id: "CSV-E001-OLD",
+      elder_id: "E001",
+      date: "2026-06-09",
+      data_source: "CSV Import",
+      heart_rate_avg: 80,
+      resting_heart_rate: 70,
+      steps: 1200,
+      active_minutes: 25,
+      sleep_duration: 5.5,
+      wear_time_hours: 16,
+      data_quality: 85,
+      created_at: "2026-07-11T10:00:00Z",
+    });
+
+    const afterOlderImport = demoReducer(initial, {
+      type: "IMPORT_WEARABLE_DATA",
+      elderId: "E001",
+      source: "CSV",
+      snapshots: [olderImport],
+    });
+
+    expect(afterOlderImport.snapshots.E001.date).toBe(serverLatest.date);
+    expect(afterOlderImport.snapshots.E001.dataSource).toBe(serverLatest.dataSource);
+    expect(afterOlderImport.trends.E001).toEqual(initial.trends.E001);
+
+    const newerImport = { ...olderImport, id: "CSV-E001-NEW", date: "2026-07-10" };
+    const afterNewerImport = demoReducer(afterOlderImport, {
+      type: "IMPORT_WEARABLE_DATA",
+      elderId: "E001",
+      source: "CSV",
+      snapshots: [newerImport],
+    });
+
+    expect(afterNewerImport.snapshots.E001.date).toBe("2026-07-10");
+    expect(afterNewerImport.snapshots.E001.dataSource).toBe("CSV Import");
   });
 });

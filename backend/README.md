@@ -1,33 +1,40 @@
 # CareBand Agent Backend v0.2
 
-最小 demo backend，负责 SQLite 存储、风险规则、导入 Apple Health 派生数据和 AI Agent 摘要。
+本后端只服务比赛主链路：DailySnapshot / 规范事件 → SQLite → 确定性规则引擎 → 三端 Agent 摘要 → 照护任务。
 
 ## 启动
 
-```bash
+从项目根目录启动整套本地 Demo：
+
+```powershell
+& scripts/start-demo.ps1
+```
+
+仅启动后端：
+
+```powershell
+cd backend
 npm install
 npm run dev
 ```
 
-默认端口：`3001`。
+默认监听 `127.0.0.1:3001`。实体 ESP32 联调必须显式使用根目录脚本的 `-HardwareMode`，不要长期暴露局域网监听。
+硬件模式下，非本机设备只能访问 `GET /api/health` 与 `POST /api/events`；事件端点仍无设备认证或 TLS，只能用于可信私有局域网。
 
 ## 环境变量
 
-复制 `.env.example` 为 `.env`：
+参考 `.env.example`。关键配置包括：
 
-```env
-PORT=3001
-DATABASE_PATH=./data/careband.sqlite
-USE_MOCK_AGENT=true
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o-mini
-AGENT_TIMEOUT_MS=30000
-CORS_ORIGIN=http://localhost:5173
-APPLE_HEALTH_STEP_SOURCE_STRATEGY=prefer_watch
-APPLE_HEALTH_XML_UPLOAD_MAX_MB=150
-```
+- `BACKEND_HOST=127.0.0.1`
+- `PORT=3001`
+- `DATABASE_PATH=./data/careband.sqlite`
+- `AGENT_PROVIDER=qwenpaw | openai | mock`
+- `QWENPAW_BASE_URL=http://127.0.0.1:8088`
+- `QWENPAW_AGENT_ID=careband_summary_agent`
+- `CORS_ORIGIN=http://127.0.0.1:5173`
+- `ALLOW_DEMO_RESET=true`（仅本地演示）
 
-无 `OPENAI_API_KEY` 或 `USE_MOCK_AGENT=true` 时自动使用 mock Agent。
+密钥只保存在本机 Provider/QwenPaw 配置或未提交的 `.env` 中。
 
 ## 数据表
 
@@ -36,8 +43,12 @@ APPLE_HEALTH_XML_UPLOAD_MAX_MB=150
 - `events`
 - `tasks`
 - `agent_outputs`
+- `agent_runs`
+- `import_runs`
+- `audit_logs`
+- `schema_migrations`
 
-SQLite 文件位于 `backend/data/careband.sqlite`，已被 ignore。
+SQLite 文件、上传临时文件和原始 Apple Health XML 均不得提交。
 
 ## API
 
@@ -46,44 +57,45 @@ SQLite 文件位于 `backend/data/careband.sqlite`，已被 ignore。
 - `GET /api/dashboard`
 - `POST /api/snapshots`
 - `POST /api/events`
+- `POST /api/import/daily-snapshots-csv/preview`
 - `POST /api/import/daily-snapshots-csv`
+- `GET /api/import/daily-snapshots-csv/history`
 - `POST /api/import/apple-health-xml/preview`
 - `POST /api/import/apple-health-xml`
 - `POST /api/agent/analyze`
 - `PATCH /api/tasks/:id`
+- `POST /api/demo/reset`（显式启用时）
 
-## 风险规则
+`POST /api/agent/analyze` 只接收 `elder_id` 和可选 `source_event_id`；服务器自行重建快照、七日基线、有效事件和风险结果，拒绝客户端伪造风险。
 
-后端先运行 deterministic riskEngine，再交给 Agent 解释：
+来自 `esp32/nrf` 的 `POST /api/events` 会先快速返回已入库的事件、规则风险和任务，再由后端排队运行同一 Agent 编排；因此实体事件不依赖网页额外调用。若旧摘要与当前规则结果不一致，Dashboard 不会把它当作当前摘要返回。
 
-- `data_quality < 40` → `insufficient_data`
-- `sos_long_press` → `high_risk`
-- `fall_detected` → `urgent`
-- 文本包含 `头晕 / 胸闷 / 跌倒 / 不舒服` → 至少 `attention`
-- 用药未确认 + `头晕` → `high_risk`
-- 步数低于基线 50% 且睡眠低于基线 25% → `attention`
-- 单项轻度异常 → `observe`
-- 否则 `stable`
+## 锁定风险规则
 
-硬事件会优先于数据不足，避免 SOS / 跌倒被低数据质量掩盖。
+- 任意未解决规范 `sos` → `urgent`，即使没有快照。
+- 跌倒置信度 ≥ 0.8 → `urgent`；≥ 0.5 → `high_risk`；更低 → `observation`。
+- 无快照、`data_quality < 40` 或佩戴少于 6 小时 → `data_insufficient`，但不能覆盖 SOS/高置信跌倒。
+- 头晕 + 最新晚药未确认 → `high_risk`。
+- 步数低于七日基线 50% 且睡眠低于基线 75% → `attention`。
+- 单项强偏离或一项轻度偏离 → `observation`；多项轻度偏离 → `attention`。
+- 已解决或超过有效时间窗的旧事件不参与判断；任务完成会解决全部关联事件。
 
-## Apple Health
+LLM 不得修改 `status_level`、`risk_score` 或 `key_reasons`。
 
-真实数据推荐路径：
+## Agent Provider
 
-```bash
-npm run preview:apple-health -- ../private_data/apple_health/export.xml
-npm run derive:apple-health -- ../private_data/apple_health/export.xml
+- `qwenpaw`：默认真实 Provider，通过 `POST /api/agent/process`、`X-Agent-Id` 和 SSE 调用专用工作区。
+- `openai`：只有显式设置 `AGENT_PROVIDER=openai` 时使用。
+- `mock`：确定性演示 Provider，也是任何真实调用失败后的明确 fallback；不会暗中切换另一付费模型。
+
+所有输出必须通过 `backend/src/schemas/agent_output.schema.json`、固定免责声明、证据和禁止诊断/处方检查。当前机器的阿里凭据已过期，因此真实 QwenPaw 探测会返回 401；代码会诚实标记 `Mock fallback`，不能把它宣称为真实 Agent 成功。
+
+## 验证
+
+```powershell
+npm test
+npm run verify:demo
+npm run smoke:qwenpaw
 ```
 
-然后导入 `private_data/derived/apple_watch_daily_snapshots.csv`。
-
-Direct XML upload 只适合开发或小文件，会写入 `backend/uploads/` 临时文件并在完成后删除；如果 XML 过大，会返回清楚错误，要求改用本地 preview/derive -> CSV 流程。
-
-GitHub Pages 无法运行本后端，也无法导入 XML/CSV。公网页面的 `/v0.2/` 版本只是静态预览，使用 safe mock fallback。
-
-默认步数策略是 `prefer_watch`：同一天同时存在 Apple Watch 和 iPhone 步数时，优先使用 Apple Watch，避免默认双重计步。
-
-## Agent Boundary
-
-目前 provider 是 mock fallback / OpenAI。未来可在 `/api/agent/analyze` 后端实现替换为 QwenPaw-compatible endpoint，但 v0.2 不宣称 QwenPaw 已完整集成。
+`verify:demo` 验证三轮确定性 Mock 闭环、实体来源事件的后端 Agent 排队、CSV 幂等和任务解决后的摘要刷新；只有 `smoke:qwenpaw` 出现 `provider=qwenpaw`、`fallback_used=false`、`validation_status=valid` 才能证明真实 Agent 链路。

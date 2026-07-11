@@ -7,12 +7,13 @@ import { Router } from "express";
 import multer from "multer";
 import {
   getElder,
-  insertImportRun,
   insertSnapshot,
+  insertSnapshotImport,
   listImportRuns,
 } from "../db.js";
 import { analyzeAppleHealthXmlFile } from "../importers/appleHealthXml.js";
 import { parseDailySnapshotsCsv } from "../importers/csvImporter.js";
+import { snapshotSchema } from "../validators.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.resolve(__dirname, "../..");
@@ -52,10 +53,12 @@ const importOptions = (req) => ({
     "prefer_watch",
 });
 
-const withDeterministicAppleSnapshotId = (snapshot) =>
-  snapshot.data_source === "Apple Health Export" && !snapshot.snapshot_id
-    ? { ...snapshot, snapshot_id: `APPLE-${snapshot.elder_id}-${snapshot.date}` }
-    : snapshot;
+const withServerOwnedSnapshotId = (snapshot) => {
+  const { snapshot_id: _ignoredClientSnapshotId, ...serverOwned } = snapshot;
+  return snapshot.data_source === "Apple Health Export"
+    ? { ...serverOwned, snapshot_id: `APPLE-${snapshot.elder_id}-${snapshot.date}` }
+    : serverOwned;
+};
 
 const csvSourceLabels = new Map([
   ["CSV", "CSV Import"],
@@ -94,7 +97,9 @@ const parseCsvUpload = (req) => {
     snapshots: parseDailySnapshotsCsv(req.file.buffer.toString("utf8"), {
       elderId,
       dataSource,
-    }).map(withDeterministicAppleSnapshotId),
+    })
+      .map(withServerOwnedSnapshotId)
+      .map((snapshot) => snapshotSchema.parse(snapshot)),
   };
 };
 
@@ -191,17 +196,20 @@ importRouter.post("/daily-snapshots-csv", csvUpload.single("file"), (req, res, n
   try {
     const { elderId, dataSource, snapshots } = parseCsvUpload(req);
     const preview = summarizeCsv(snapshots);
-    const inserted = snapshots.map(insertSnapshot);
-    const importRun = insertImportRun({
-      elder_id: elderId,
-      source_type: dataSource,
-      file_name: path.basename(req.file.originalname),
-      snapshot_count: inserted.length,
-      date_start: preview.date_range.start,
-      date_end: preview.date_range.end,
-      quality_summary: preview.quality_summary,
-      warnings: preview.warnings,
+    const confirmation = insertSnapshotImport({
+      snapshots,
+      import_run: {
+        elder_id: elderId,
+        source_type: dataSource,
+        file_name: path.basename(req.file.originalname),
+        date_start: preview.date_range.start,
+        date_end: preview.date_range.end,
+        quality_summary: preview.quality_summary,
+        warnings: preview.warnings,
+      },
     });
+    const inserted = confirmation.snapshots;
+    const importRun = confirmation.import_run;
 
 
     res.status(201).json({
@@ -264,7 +272,7 @@ importRouter.post("/apple-health-xml", xmlUploadSingle, async (req, res, next) =
     }
 
     const { snapshots, preview } = await analyzeAppleHealthXmlFile(req.file.path, options);
-    const inserted = snapshots.map(insertSnapshot);
+    const inserted = snapshots.map((snapshot) => insertSnapshot(snapshotSchema.parse(snapshot)));
 
     res.status(201).json({
       ok: true,

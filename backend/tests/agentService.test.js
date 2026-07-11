@@ -51,6 +51,44 @@ test("invalid real Agent output retries once then uses labelled deterministic fa
   assert.match(response.agent_result.caregiver_summary, /Mock fallback/);
 });
 
+test("a repaired second real Agent response is accepted without Mock fallback", async () => {
+  const repairInputs = [];
+  let attempts = 0;
+  const response = await analyzeAgent(input, {
+    provider: "qwenpaw",
+    runners: {
+      qwenpaw: async (_payload, options) => {
+        attempts += 1;
+        repairInputs.push(options.repairErrors);
+        if (attempts === 1) {
+          return {
+            result: { status_level: "stable" },
+            rawResponse: "{}",
+          };
+        }
+        return {
+          result: {
+            ...input.risk_result,
+            caregiver_summary: "请护工立即查看陈伯并记录现场情况。",
+            family_summary: "照护团队正在优先跟进陈伯当前情况。",
+            institution_summary: "E001 已进入高风险优先处理队列。",
+            safety_disclaimer: SAFETY_DISCLAIMER,
+          },
+          rawResponse: "{\"repaired\":true}",
+        };
+      },
+    },
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(repairInputs[0].length, 0);
+  assert.ok(repairInputs[1].length > 0);
+  assert.equal(response.meta.provider, "qwenpaw");
+  assert.equal(response.meta.fallback_used, false);
+  assert.equal(response.meta.attempts, 2);
+  assert.equal(response.agent_result.status_level, "high_risk");
+});
+
 test("OpenAI repair retries include the previous validation errors in the prompt", () => {
   const prompt = JSON.parse(
     buildOpenAiPromptInput(input, {

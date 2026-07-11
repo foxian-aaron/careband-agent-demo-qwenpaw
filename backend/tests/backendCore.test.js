@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { eventSchema } from "../src/validators.js";
+import { eventSchema, snapshotSchema } from "../src/validators.js";
 
 process.env.DATABASE_PATH = ":memory:";
 process.env.AGENT_PROVIDER = "mock";
@@ -65,6 +65,88 @@ test("unknown event types and sources are rejected instead of silently downgrade
   );
 });
 
+test("event normalization minimizes voice and location data before storage", () => {
+  const voice = eventSchema.parse({
+    elder_id: "E001",
+    event_type: "voice",
+    source: "mobile_app",
+    raw_text: `我有点头晕 ${"不应无限保存".repeat(40)}`,
+    payload: {
+      action: "symptom_report",
+      transcript: "full raw transcript must be dropped",
+      transcript_summary: "我有点头晕，请护工查看",
+      symptom_keywords: ["头晕"],
+      raw_audio: "base64-private-audio",
+    },
+  });
+  const location = eventSchema.parse({
+    elder_id: "E001",
+    event_type: "location",
+    source: "mobile_app",
+    raw_text: "澳门某街道 123 号精确门牌",
+    payload: {
+      action: "geofence_exit",
+      location_zone: "A 区",
+      safe_zone_status: "outside",
+      latitude: 22.19,
+      longitude: 113.54,
+      precise_address: "澳门某街道 123 号",
+    },
+  });
+
+  assert.equal(voice.raw_text, "我有点头晕，请护工查看");
+  assert.deepEqual(voice.payload, {
+    action: "symptom_report",
+    transcript_summary: "我有点头晕，请护工查看",
+    symptom_keywords: ["头晕"],
+  });
+  assert.deepEqual(location.payload, {
+    action: "geofence_exit",
+    location_zone: "A 区",
+    safe_zone_status: "outside",
+  });
+  assert.doesNotMatch(JSON.stringify(location), /22\.19|113\.54|123 号|precise_address/);
+
+  const disguisedPreciseLocation = eventSchema.parse({
+    elder_id: "E001",
+    event_type: "location",
+    source: "mobile_app",
+    payload: {
+      action: "geofence_exit",
+      location_zone: "澳门某街道 123 号 / 22.19,113.54",
+      safe_zone_status: "outside",
+    },
+  });
+  assert.deepEqual(disguisedPreciseLocation.payload, {
+    action: "geofence_exit",
+    safe_zone_status: "outside",
+  });
+  assert.doesNotMatch(JSON.stringify(disguisedPreciseLocation), /22\.19|113\.54|123 号/);
+});
+
+test("DailySnapshot validation rejects invalid dates, sources, and metric ranges", () => {
+  const valid = {
+    elder_id: "E001",
+    date: "2026-07-11",
+    data_source: "CSV Import",
+    heart_rate_avg: 72,
+    resting_heart_rate: 66,
+    steps: 2000,
+    active_minutes: 30,
+    sleep_duration: 7,
+    wear_time_hours: 18,
+    data_quality: 85,
+  };
+
+  assert.doesNotThrow(() => snapshotSchema.parse(valid));
+  assert.throws(() => snapshotSchema.parse({ ...valid, date: "2026-02-30" }));
+  assert.throws(() => snapshotSchema.parse({ ...valid, data_source: "Fitbit" }));
+  assert.throws(() => snapshotSchema.parse({ ...valid, steps: -1 }));
+  assert.throws(() => snapshotSchema.parse({ ...valid, steps: 12.5 }));
+  assert.throws(() => snapshotSchema.parse({ ...valid, sleep_duration: 25 }));
+  assert.throws(() => snapshotSchema.parse({ ...valid, wear_time_hours: 24.1 }));
+});
+
 test("daily snapshots are idempotent and the seven-day baseline excludes the latest date", () => {
   for (let day = 1; day <= 8; day += 1) {
     db.insertSnapshot({
@@ -125,6 +207,137 @@ test("POST /api/events creates an urgent task for SOS without a snapshot", async
     assert.equal(response.status, 201);
     assert.equal(body.risk_result.status_level, "urgent");
     assert.equal(body.task.status, "open");
+    assert.equal(body.agent_dispatch.status, "queued");
+    let hardwareOutput = null;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      hardwareOutput = db.getLatestAgentOutput("E001");
+      if (hardwareOutput?.source_event_id === body.event.event_id) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const hardwareRun = db.getLatestAgentRun("E001");
+    assert.equal(hardwareOutput.source_event_id, body.event.event_id);
+    assert.equal(hardwareOutput.status_level, body.risk_result.status_level);
+    assert.equal(hardwareOutput.risk_score, body.risk_result.risk_score);
+    assert.deepEqual(hardwareOutput.key_reasons, body.risk_result.key_reasons);
+    assert.equal(hardwareRun.source_event_id, body.event.event_id);
+    assert.equal(hardwareRun.provider, "mock");
+    assert.equal(hardwareRun.requested_provider, "mock");
+    const auditActions = db
+      .getDb()
+      .prepare("SELECT action FROM audit_logs WHERE elder_id = 'E001'")
+      .all()
+      .map((row) => row.action);
+    assert.ok(auditActions.includes("event.accepted"));
+    assert.ok(auditActions.includes("task.created"));
+    assert.ok(auditActions.includes("risk.urgent"));
+  });
+});
+
+test("POST /api/snapshots rejects out-of-range normalized metrics", async () => {
+  db.resetDemoData();
+
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/snapshots`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        elder_id: "E001",
+        date: "2026-07-11",
+        data_source: "CSV Import",
+        steps: -20,
+        wear_time_hours: 28,
+        data_quality: 85,
+      }),
+    });
+
+    assert.equal(response.status, 400);
+  });
+});
+
+test("POST /api/events persists only region-level location and voice summaries", async () => {
+  db.resetDemoData();
+
+  await withServer(async (baseUrl) => {
+    const locationResponse = await fetch(`${baseUrl}/api/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        elder_id: "E001",
+        event_type: "location",
+        source: "mobile_app",
+        raw_text: "澳门某街道 123 号",
+        payload: {
+          action: "geofence_exit",
+          location_zone: "A 区",
+          safe_zone_status: "outside",
+          latitude: 22.19,
+          longitude: 113.54,
+          precise_address: "澳门某街道 123 号",
+        },
+      }),
+    });
+    const locationBody = await locationResponse.json();
+    const storedLocation = db
+      .getDb()
+      .prepare("SELECT raw_text, payload FROM events WHERE event_id = ?")
+      .get(locationBody.event.event_id);
+
+    const voiceResponse = await fetch(`${baseUrl}/api/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        elder_id: "E001",
+        event_type: "voice",
+        source: "mobile_app",
+        raw_text: "完整语音内容不应直接持久化",
+        payload: {
+          action: "symptom_report",
+          transcript: "raw transcript private payload",
+          transcript_summary: "长者表示有点头晕",
+          symptom_keywords: ["头晕"],
+          raw_audio: "private audio bytes",
+        },
+      }),
+    });
+    const voiceBody = await voiceResponse.json();
+    const storedVoice = db
+      .getDb()
+      .prepare("SELECT raw_text, payload FROM events WHERE event_id = ?")
+      .get(voiceBody.event.event_id);
+
+    const malformedVoiceResponse = await fetch(`${baseUrl}/api/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        elder_id: "E001",
+        event_type: "voice",
+        source: "mobile_app",
+        raw_text: "不应保存的完整语音",
+        payload: {
+          action: { invalid: true },
+          transcript_summary: "摘要".repeat(200),
+          symptom_keywords: { bad: true },
+        },
+      }),
+    });
+    const malformedVoice = await malformedVoiceResponse.json();
+    const dashboardResponse = await fetch(`${baseUrl}/api/dashboard`);
+
+    assert.equal(locationResponse.status, 201);
+    assert.doesNotMatch(
+      JSON.stringify(storedLocation),
+      /22\.19|113\.54|123 号|precise_address|latitude|longitude/,
+    );
+    assert.match(storedLocation.raw_text, /A 区/);
+    assert.equal(voiceResponse.status, 201);
+    assert.equal(storedVoice.raw_text, "长者表示有点头晕");
+    assert.doesNotMatch(storedVoice.payload, /raw transcript|raw_audio|private audio/);
+    assert.equal(malformedVoiceResponse.status, 201);
+    assert.equal(malformedVoice.event.raw_text.length, 160);
+    assert.deepEqual(malformedVoice.event.payload, {
+      transcript_summary: malformedVoice.event.raw_text,
+    });
+    assert.equal(dashboardResponse.status, 200);
   });
 });
 
@@ -346,6 +559,17 @@ test("local demo reset preserves TEST001 wearable snapshots", async () => {
 
     assert.equal(resetResponse.status, 200);
     assert.equal(testSubject.latest_snapshot.steps, 4321);
+    for (const entry of dashboard.elders.filter(
+      (item) => item.elder.subject_kind === "elder",
+    )) {
+      assert.equal(entry.latest_agent_output.status_level, entry.risk_result.status_level);
+      assert.equal(entry.latest_agent_output.risk_score, entry.risk_result.risk_score);
+      assert.deepEqual(entry.latest_agent_output.key_reasons, entry.risk_result.key_reasons);
+      assert.equal(
+        entry.latest_agent_output.recommended_action,
+        entry.risk_result.recommended_action,
+      );
+    }
   });
 });
 
@@ -356,11 +580,11 @@ test("CSV preview is read-only and confirm imports idempotently with server meta
     "WRONG,2026-07-09,Untrusted,82,,1200,24,6.1,17,85",
   ].join("\n");
 
-  const postCsv = async (baseUrl, suffix) => {
+  const postCsv = async (baseUrl, suffix, content = csv) => {
     const form = new FormData();
     form.append("elder_id", "E001");
     form.append("source", "CSV Import");
-    form.append("file", new Blob([csv], { type: "text/csv" }), "daily.csv");
+    form.append("file", new Blob([content], { type: "text/csv" }), "daily.csv");
     return fetch(`${baseUrl}/api/import/daily-snapshots-csv${suffix}`, {
       method: "POST",
       body: form,
@@ -396,10 +620,69 @@ test("CSV preview is read-only and confirm imports idempotently with server meta
       1,
     );
 
+    const duplicateClientIds = [
+      "elder_id,date,data_source,heart_rate_avg,resting_heart_rate,steps,active_minutes,sleep_duration,wear_time_hours,data_quality,snapshot_id",
+      "WRONG,2026-07-10,Untrusted,80,68,1500,30,6.4,18,86,client-controlled-id",
+      "WRONG,2026-07-11,Untrusted,79,67,1700,32,6.6,18,87,client-controlled-id",
+    ].join("\n");
+    const serverOwnedResponse = await postCsv(baseUrl, "", duplicateClientIds);
+    const serverOwned = await serverOwnedResponse.json();
+    assert.equal(serverOwnedResponse.status, 201);
+    assert.equal(serverOwned.count, 2);
+    assert.notEqual(serverOwned.snapshots[0].snapshot_id, "client-controlled-id");
+    assert.notEqual(serverOwned.snapshots[1].snapshot_id, "client-controlled-id");
+    assert.notEqual(serverOwned.snapshots[0].snapshot_id, serverOwned.snapshots[1].snapshot_id);
+
+    const postImportDashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
+    const postImportE001 = postImportDashboard.elders.find(
+      (entry) => entry.elder.elder_id === "E001",
+    );
+    assert.equal(postImportE001.latest_agent_output, null);
+    assert.equal(postImportE001.latest_agent_output_stale, true);
+
     const history = await (
       await fetch(`${baseUrl}/api/import/daily-snapshots-csv/history?elder_id=E001`)
     ).json();
-    assert.equal(history.imports.length, 2);
+    assert.equal(history.imports.length, 3);
+
+    const rollbackSnapshot = {
+      elder_id: "E001",
+      data_source: "CSV Import",
+      heart_rate_avg: 78,
+      resting_heart_rate: 66,
+      steps: 1800,
+      active_minutes: 33,
+      sleep_duration: 6.8,
+      wear_time_hours: 18,
+      data_quality: 88,
+    };
+    assert.throws(() =>
+      db.insertSnapshotImport({
+        snapshots: [
+          { ...rollbackSnapshot, snapshot_id: "ROLLBACK-DUPLICATE", date: "2026-07-12" },
+          { ...rollbackSnapshot, snapshot_id: "ROLLBACK-DUPLICATE", date: "2026-07-13" },
+        ],
+        import_run: {
+          import_id: "ROLLBACK-IMPORT",
+          elder_id: "E001",
+          source_type: "CSV Import",
+        },
+      }),
+    );
+    assert.equal(
+      db
+        .getDb()
+        .prepare("SELECT COUNT(*) AS count FROM snapshots WHERE snapshot_id = ?")
+        .get("ROLLBACK-DUPLICATE").count,
+      0,
+    );
+    assert.equal(
+      db
+        .getDb()
+        .prepare("SELECT COUNT(*) AS count FROM import_runs WHERE import_id = ?")
+        .get("ROLLBACK-IMPORT").count,
+      0,
+    );
   });
 });
 
@@ -450,6 +733,7 @@ test("Agent analysis accepts only an elder reference and rebuilds rule-owned con
     const run = db.getDb().prepare("SELECT * FROM agent_runs ORDER BY created_at DESC LIMIT 1").get();
     assert.equal(run.elder_id, "E001");
     assert.equal(run.validation_status, "valid");
+    assert.equal(run.requested_provider, "mock");
     assert.equal(run.input_summary.includes("precise_location"), false);
 
     const dashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
@@ -496,6 +780,26 @@ test("TEST001 uses Mock unless real team-test Agent access is explicitly enabled
         (entry) => entry.elder.elder_id === "TEST001",
       ).latest_agent_run;
       assert.equal(testRun.provider, "mock");
+      assert.equal(testRun.requested_provider, "qwenpaw");
+
+      const fallbackResponse = await fetch(`${baseUrl}/api/agent/analyze`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ elder_id: "E004" }),
+      });
+      const fallbackBody = await fallbackResponse.json();
+      assert.equal(fallbackResponse.status, 201);
+      assert.equal(fallbackBody.meta.provider, "mock");
+      assert.equal(fallbackBody.meta.requested_provider, "qwenpaw");
+      assert.equal(fallbackBody.meta.fallback_used, true);
+
+      const fallbackDashboard = await (await fetch(`${baseUrl}/api/dashboard`)).json();
+      const fallbackRun = fallbackDashboard.elders.find(
+        (entry) => entry.elder.elder_id === "E004",
+      ).latest_agent_run;
+      assert.equal(fallbackRun.provider, "mock");
+      assert.equal(fallbackRun.requested_provider, "qwenpaw");
+      assert.equal(fallbackRun.fallback_used, true);
     });
   } finally {
     restoreEnv("AGENT_PROVIDER", previous.provider);
@@ -510,6 +814,7 @@ test("failed Agent runs are audited as failed instead of completed", () => {
   const run = db.insertAgentRun({
     elder_id: "E001",
     provider: "qwenpaw",
+    requested_provider: "qwenpaw",
     validation_status: "failed",
     fallback_used: false,
     error_reason: "synthetic failure",
@@ -520,6 +825,7 @@ test("failed Agent runs are audited as failed instead of completed", () => {
     .get(run.run_id);
 
   assert.equal(audit.action, "agent.failed");
+  assert.equal(run.requested_provider, "qwenpaw");
 });
 
 test("POST /api/events ignores forged risk results and excludes stale events", async () => {

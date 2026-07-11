@@ -4,7 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { SAFETY_DISCLAIMER } from "./constants.js";
-import { normalizeEventInput } from "./validators.js";
+import { eventSchema } from "./validators.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -117,6 +117,7 @@ function runMigrations(db) {
     ensureColumn(db, "events", "resolved_by", "TEXT");
     ensureColumn(db, "events", "linked_task_id", "TEXT");
     ensureColumn(db, "tasks", "updated_at", "TEXT");
+    ensureColumn(db, "agent_runs", "requested_provider", "TEXT");
 
     db.prepare(
       `DELETE FROM snapshots
@@ -127,12 +128,26 @@ function runMigrations(db) {
     db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_elder_date_unique ON snapshots (elder_id, date)",
     );
+    db.prepare(
+      `UPDATE snapshots
+       SET data_source = CASE LOWER(TRIM(data_source))
+         WHEN 'csv' THEN 'CSV Import'
+         WHEN 'apple health' THEN 'Apple Health Export'
+         WHEN 'apple watch' THEN 'Apple Health Export'
+         WHEN 'demo' THEN 'Demo Seed'
+         WHEN 'mock' THEN 'Demo Seed'
+         ELSE data_source
+       END`,
+    ).run();
 
     db.prepare("UPDATE elders SET subject_kind = 'team_test' WHERE elder_id = 'TEST001'").run();
     db.prepare("UPDATE tasks SET status = 'open' WHERE status = 'pending'").run();
     db.prepare("UPDATE tasks SET status = 'resolved' WHERE status = 'completed'").run();
     db.prepare(
       "UPDATE tasks SET updated_at = COALESCE(updated_at, completed_at, created_at)",
+    ).run();
+    db.prepare(
+      "UPDATE agent_runs SET requested_provider = COALESCE(requested_provider, provider)",
     ).run();
     db.prepare("UPDATE agent_outputs SET status_level = 'observation' WHERE status_level = 'observe'").run();
     db.prepare(
@@ -154,6 +169,7 @@ function normalizeStoredData(db) {
     `UPDATE events
      SET event_type = @event_type,
          source = @source,
+         raw_text = @raw_text,
          payload = @payload,
          received_at = @received_at,
          severity_hint = @severity_hint,
@@ -164,15 +180,17 @@ function normalizeStoredData(db) {
 
   const normalize = db.transaction(() => {
     for (const row of rows) {
-      const event = normalizeEventInput({
+      const event = eventSchema.parse({
         ...row,
         occurred_at: row.timestamp,
+        received_at: row.received_at || row.created_at || row.timestamp,
         payload: parseJson(row.payload, {}),
       });
       update.run({
         event_id: row.event_id,
         event_type: event.event_type,
         source: event.source,
+        raw_text: event.raw_text,
         payload: stringifyJson(event.payload),
         received_at: row.received_at || row.created_at || row.timestamp,
         severity_hint: row.severity_hint === "info" ? event.severity_hint : row.severity_hint,
@@ -356,34 +374,63 @@ function seedDemoData(db) {
     },
   ];
 
+  const seedRisk = {
+    E001: {
+      status_level: "attention",
+      risk_score: 62,
+      key_reasons: ["步數較個人基線下降約 62%，睡眠較基線下降約 26%。"],
+      recommended_action: "建議護工今日內查看狀態，並確認休息、活動與用藥情況。",
+    },
+    E002: {
+      status_level: "observation",
+      risk_score: 38,
+      key_reasons: [
+        "睡眠較個人基線下降約 29%。",
+        "有一項輕度偏離個人基線。第一版以靜息心率而非平均心率比較基線。",
+      ],
+      recommended_action: "建議護工在例行巡查中關注變化，必要時複核資料。",
+    },
+    E003: {
+      status_level: "observation",
+      risk_score: 38,
+      key_reasons: [
+        "步數較個人基線下降約 57%。",
+        "有一項輕度偏離個人基線。第一版以靜息心率而非平均心率比較基線。",
+      ],
+      recommended_action: "建議護工在例行巡查中關注變化，必要時複核資料。",
+    },
+    E004: {
+      status_level: "stable",
+      risk_score: 12,
+      key_reasons: ["今日關鍵指標接近個人基線。"],
+      recommended_action: "保持常規照護與日常觀察。",
+    },
+  };
+
   const agentOutputs = elders.map((elder) => {
-    const status = elder.elder_id === "E004" ? "stable" : "attention";
+    const risk = seedRisk[elder.elder_id];
+    const stable = risk.status_level === "stable";
     return {
       output_id: `AGENT-${elder.elder_id}-SEED`,
       elder_id: elder.elder_id,
       source_event_id: null,
-      status_level: status,
-      risk_score: status === "stable" ? 16 : 52,
+      status_level: risk.status_level,
+      risk_score: risk.risk_score,
       caregiver_summary:
-        status === "stable"
+        stable
           ? `${elder.name}今日指标接近个人基线，保持常规照护。`
           : `${elder.name}今日有一项以上指标偏离个人基线，建议护工在巡查中确认状态。`,
       family_summary:
-        status === "stable"
+        stable
           ? `${elder.name}今日状态平稳，中心会继续常规观察。`
           : `${elder.name}今日有需要关注的变化，照护人员会继续跟进。`,
       institution_summary:
-        status === "stable"
+        stable
           ? `${elder.name}可维持常规观察。`
           : `${elder.name}建议纳入今日巡查关注列表。`,
-      recommended_action:
-        status === "stable"
-          ? "保持常规照护与日常观察。"
-          : "请护工结合现场情况复核活动、睡眠和用药状态。",
+      recommended_action: risk.recommended_action,
       safety_disclaimer: SAFETY_DISCLAIMER,
-      key_reasons: stringifyJson(
-        status === "stable" ? ["今日状态接近个人基线"] : ["存在照护风险提示项"],
-      ),
+      key_reasons: stringifyJson(risk.key_reasons),
       agent_source: "mock",
       warning: null,
       created_at: "2026-06-19T20:10:00+08:00",
@@ -687,9 +734,9 @@ export function getLatestAgentRun(elderId) {
 export function insertSnapshot(snapshot) {
   const db = getDb();
   const record = {
+    ...snapshot,
     snapshot_id: snapshot.snapshot_id ?? randomUUID(),
     created_at: snapshot.created_at ?? nowIso(),
-    ...snapshot,
   };
 
   db.prepare(
@@ -840,6 +887,20 @@ export function insertImportRun(run) {
   );
 }
 
+export function insertSnapshotImport({ snapshots, import_run }) {
+  const db = getDb();
+  const confirm = db.transaction(() => {
+    const inserted = snapshots.map((snapshot) => insertSnapshot(snapshot));
+    const importRun = insertImportRun({
+      ...import_run,
+      snapshot_count: inserted.length,
+    });
+    return { snapshots: inserted, import_run: importRun };
+  });
+
+  return confirm();
+}
+
 export function insertAgentRun(run) {
   const db = getDb();
   const record = {
@@ -847,6 +908,7 @@ export function insertAgentRun(run) {
     elder_id: run.elder_id,
     source_event_id: run.source_event_id ?? null,
     provider: run.provider,
+    requested_provider: run.requested_provider ?? run.provider,
     model: run.model ?? null,
     started_at: run.started_at ?? nowIso(),
     duration_ms: run.duration_ms ?? null,
@@ -863,11 +925,11 @@ export function insertAgentRun(run) {
 
   db.prepare(
     `INSERT INTO agent_runs (
-       run_id, elder_id, source_event_id, provider, model, started_at,
+       run_id, elder_id, source_event_id, provider, requested_provider, model, started_at,
        duration_ms, validation_status, fallback_used, error_reason,
        input_summary, raw_response_excerpt, created_at
      ) VALUES (
-       @run_id, @elder_id, @source_event_id, @provider, @model, @started_at,
+       @run_id, @elder_id, @source_event_id, @provider, @requested_provider, @model, @started_at,
        @duration_ms, @validation_status, @fallback_used, @error_reason,
        @input_summary, @raw_response_excerpt, @created_at
      )`,
@@ -887,6 +949,7 @@ export function insertAgentRun(run) {
     metadata: {
       validation_status: record.validation_status,
       fallback_used: Boolean(record.fallback_used),
+      requested_provider: record.requested_provider,
       duration_ms: record.duration_ms,
     },
   });
@@ -961,6 +1024,18 @@ export function createTaskForRisk({ elder, event, riskResult }) {
         nowIso(),
         existing.task_id,
       );
+      insertAuditLog({
+        elder_id: elder.elder_id,
+        action: "task.escalated",
+        actor: "rule_engine",
+        target_type: "task",
+        target_id: existing.task_id,
+        metadata: {
+          previous_priority: existing.priority,
+          priority: nextPriority,
+          source_event_id: event?.event_id ?? existing.source_event_id,
+        },
+      });
       return mapTask(db.prepare("SELECT * FROM tasks WHERE task_id = ?").get(existing.task_id));
     }
 
@@ -1019,6 +1094,19 @@ export function createTaskForRisk({ elder, event, riskResult }) {
       event.event_id,
     );
   }
+
+  insertAuditLog({
+    elder_id: elder.elder_id,
+    action: "task.created",
+    actor: "rule_engine",
+    target_type: "task",
+    target_id: record.task_id,
+    metadata: {
+      priority: record.priority,
+      source_event_id: record.source_event_id,
+      status_level: riskResult.status_level,
+    },
+  });
 
   return mapTask(db.prepare("SELECT * FROM tasks WHERE task_id = ?").get(record.task_id));
 }

@@ -251,6 +251,7 @@ export interface CareTask {
 }
 
 export interface AgentRoleSummaries {
+  outputId?: string;
   caregiverSummary: string;
   familySummary: string;
   institutionSummary: string;

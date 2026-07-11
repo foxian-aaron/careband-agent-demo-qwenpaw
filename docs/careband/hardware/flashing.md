@@ -11,11 +11,21 @@ Copy-Item include/config_local.example.h include/config_local.h
 只编辑被 `.gitignore` 忽略的 `config_local.h`：
 
 - 演示 Wi-Fi SSID 与密码；
-- 运行后端的局域网地址，例如 `http://192.168.x.x:8787/api/events`，不能填 `localhost`；
+- 运行后端的局域网地址，例如 `http://192.168.x.x:3001/api/events`，不能填 `localhost`；
 - 演示长者 `E001` 与原型设备编号；
 - 按实际接线修改 GPIO 和有效电平。
 
 不要把令牌、真实长者身份或生产地址写入固件。
+
+需要实体 ESP32 连接时，在项目根目录显式启用硬件模式：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-demo.ps1 -HardwareMode
+```
+
+脚本会保持前端仅监听 `127.0.0.1`，只把后端绑定到 `0.0.0.0:3001`，并打印一个或多个可填入 `CAREBAND_EVENTS_URL` 的局域网 `/api/events` 地址。选择与 ESP32 同一网段的地址。默认不加 `-HardwareMode` 时，后端仍只接受本机连接。
+
+硬件模式仅限可信的私有局域网：非本机设备只能访问 `GET /api/health` 与 `POST /api/events`，但当前事件端点仍没有设备认证或 TLS。不要设置路由器端口转发；Windows 防火墙提示时只允许“专用网络”，测试完成后停止服务。
 
 ## 2. 先跑原生状态机测试
 

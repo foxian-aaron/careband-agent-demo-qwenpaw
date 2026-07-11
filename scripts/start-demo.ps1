@@ -3,13 +3,17 @@ param(
   [int]$BackendPort = 3001,
   [ValidateSet('qwenpaw', 'openai', 'mock')]
   [string]$AgentProvider = 'qwenpaw',
-  [switch]$SkipQwenPaw
+  [switch]$SkipQwenPaw,
+  [switch]$HardwareMode
 )
 
 $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
+
+$NetworkModule = Join-Path $PSScriptRoot 'CareBand.Network.psm1'
+Import-Module $NetworkModule -Force
 
 $BundledNode = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
 $NodeCommand = Get-Command node -ErrorAction SilentlyContinue
@@ -86,11 +90,15 @@ if (-not (Test-Path (Join-Path $BackendRoot 'node_modules'))) {
 
 $env:PORT = "$BackendPort"
 $env:FRONTEND_PORT = "$Port"
+$env:BACKEND_HOST = Get-CareBandBackendHost -HardwareMode:$HardwareMode
+$env:SERVE_STATIC_FRONTEND = Get-CareBandServeStaticFrontend -HardwareMode:$HardwareMode
+$env:HARDWARE_MODE = if ($HardwareMode) { 'true' } else { 'false' }
 $env:CORS_ORIGIN = "http://127.0.0.1:$Port"
 $env:VITE_API_BASE_URL = "http://127.0.0.1:$BackendPort"
 $env:AGENT_PROVIDER = $AgentProvider
 $env:QWENPAW_BASE_URL = 'http://127.0.0.1:8088'
 $env:QWENPAW_AGENT_ID = 'careband_summary_agent'
+$QwenTimeoutWasConfigured = -not [string]::IsNullOrWhiteSpace($env:QWENPAW_TIMEOUT_MS)
 if (-not $env:QWENPAW_TIMEOUT_MS) {
   $env:QWENPAW_TIMEOUT_MS = '5000'
 }
@@ -107,39 +115,58 @@ function Test-QwenPawReady {
   }
 }
 
-if ($AgentProvider -eq 'qwenpaw' -and -not $SkipQwenPaw -and -not (Test-QwenPawReady)) {
-  $QwenCommand = (Get-Command qwenpaw -ErrorAction SilentlyContinue).Source
-  if ($QwenCommand) {
-    $QwenLogRoot = Join-Path $env:LOCALAPPDATA 'CareBandDemo\qwenpaw'
-    New-Item -ItemType Directory -Force -Path $QwenLogRoot | Out-Null
-    Write-Host 'Starting the local QwenPaw service in the background...'
-    $QwenStartOptions = @{
-      FilePath = 'powershell.exe'
-      ArgumentList = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $QwenCommand,
-        'app', '--host', '127.0.0.1', '--port', '8088', '--log-level', 'warning'
-      )
-      WorkingDirectory = $QwenLogRoot
-      WindowStyle = 'Hidden'
-      PassThru = $true
-    }
-    $QwenProcess = Start-Process @QwenStartOptions
-    $QwenStartedHere = $true
+if ($AgentProvider -eq 'qwenpaw') {
+  if (-not $SkipQwenPaw -and -not (Test-QwenPawReady)) {
+    $QwenCommand = (Get-Command qwenpaw -ErrorAction SilentlyContinue).Source
+    if ($QwenCommand) {
+      $QwenLogRoot = Join-Path $env:LOCALAPPDATA 'CareBandDemo\qwenpaw'
+      New-Item -ItemType Directory -Force -Path $QwenLogRoot | Out-Null
+      Write-Host 'Starting the local QwenPaw service in the background...'
+      $QwenStartOptions = @{
+        FilePath = 'powershell.exe'
+        ArgumentList = @(
+          '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $QwenCommand,
+          'app', '--host', '127.0.0.1', '--port', '8088', '--log-level', 'warning'
+        )
+        WorkingDirectory = $QwenLogRoot
+        WindowStyle = 'Hidden'
+        PassThru = $true
+      }
+      $QwenProcess = Start-Process @QwenStartOptions
+      $QwenStartedHere = $true
 
-    for ($attempt = 0; $attempt -lt 30 -and -not (Test-QwenPawReady); $attempt += 1) {
-      Start-Sleep -Milliseconds 500
+      for ($attempt = 0; $attempt -lt 30 -and -not (Test-QwenPawReady); $attempt += 1) {
+        Start-Sleep -Milliseconds 500
+      }
     }
   }
 
   if (-not (Test-QwenPawReady)) {
-    Write-Warning 'QwenPaw did not become ready. The demo will start with explicit deterministic Mock mode.'
-    $env:AGENT_PROVIDER = 'mock'
+    Write-Warning 'QwenPaw is offline. The backend will keep requested_provider=qwenpaw and record an explicit deterministic Mock fallback.'
+    if (-not $QwenTimeoutWasConfigured) {
+      $env:QWENPAW_TIMEOUT_MS = '1000'
+    }
   }
 }
 
 Write-Host "Starting CareBand Agent Demo v0.2 (Agent provider: $($env:AGENT_PROVIDER))..."
 Write-Host "Frontend: http://127.0.0.1:$Port/#/institution"
 Write-Host "Backend:  http://127.0.0.1:$BackendPort/api/health"
+if ($HardwareMode) {
+  $HardwareEventUrls = @(Get-CareBandHardwareEventUrls -Port $BackendPort)
+  Write-Warning 'Hardware mode is ON: only the backend is listening on all network interfaces; the Vite frontend remains bound to 127.0.0.1.'
+  if ($HardwareEventUrls.Count -eq 0) {
+    Write-Warning "No usable LAN IPv4 address was detected. Connect this computer and the ESP32 to the same trusted Wi-Fi, then rerun the script."
+  } else {
+    Write-Host 'ESP32 event URL candidates (choose the address on the same LAN as the board):'
+    foreach ($HardwareEventUrl in $HardwareEventUrls) {
+      Write-Host "  $HardwareEventUrl"
+    }
+  }
+  Write-Warning 'Security: LAN peers can reach only GET /api/health and POST /api/events, but the event endpoint still has no device authentication or TLS. Use only a trusted private LAN, do not configure router port-forwarding, and stop the demo after testing. If Windows Firewall prompts, allow only Private networks.'
+} else {
+  Write-Host 'Hardware mode: OFF. The backend is loopback-only. Add -HardwareMode only when an ESP32 on the same trusted LAN must connect.'
+}
 try {
   & $NodeExe 'scripts\start-v02.mjs'
 } finally {

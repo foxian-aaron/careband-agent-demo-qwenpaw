@@ -34,7 +34,7 @@ const responseSnapshots = (response: BackendCsvImportResponse | null) => {
 };
 
 export const WearableImportPage = ({ elderId }: WearableImportPageProps) => {
-  const { state, dispatch } = useDemo();
+  const { state, dispatch, refreshDashboard } = useDemo();
   const profile = state.profiles[elderId];
   const [source, setSource] = useState<WearableDataSource>("CSV");
   const [csv, setCsv] = useState(wearableCsvExample);
@@ -129,6 +129,7 @@ export const WearableImportPage = ({ elderId }: WearableImportPageProps) => {
           source,
           snapshots,
         });
+        await refreshDashboard();
       }
       try {
         const historyResponse = await apiGetDailySnapshotsCsvHistory(profile.elderId);

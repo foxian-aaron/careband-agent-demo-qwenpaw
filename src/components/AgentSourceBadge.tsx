@@ -12,7 +12,13 @@ export const AgentSourceBadge = ({ summaries }: { summaries: AgentRoleSummaries 
           : "确定性 Mock";
 
   return (
-    <div className="tag-row" aria-label="Agent output metadata">
+    <div
+      className="tag-row"
+      aria-label="Agent output metadata"
+      data-agent-output-id={summaries.outputId ?? "local-fallback"}
+      data-agent-source={summaries.agentSource ?? "mock"}
+      data-agent-validation={summaries.validationStatus ?? "local_mock"}
+    >
       <StatusPill label={sourceLabel} tone={summaries.fallbackUsed ? "attention" : "stable"} />
       <StatusPill
         label={`JSON：${summaries.validationStatus ?? "local_mock"}`}

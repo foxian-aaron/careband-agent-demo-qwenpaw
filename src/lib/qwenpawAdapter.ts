@@ -30,12 +30,7 @@ export const buildQwenPawRequest = (
   scenario: AgentRequest["scenario"],
   riskResult: RiskResult,
   context: Record<string, unknown>,
-): AgentRequest => ({
-  elderId,
-  scenario,
-  riskResult,
-  context,
-});
+): AgentRequest => ({ elderId, scenario, riskResult, context });
 
 export const mapMockSummariesToAgentResponse = (
   summary: keyof AgentRoleSummaries,
@@ -43,7 +38,7 @@ export const mapMockSummariesToAgentResponse = (
 ): AgentResponse => ({
   summary: String(summaries[summary]),
   decisionTrace: summaries.decisionTrace,
-  modelName: "mock-agent-v0.1.1",
+  modelName: "deterministic-mock-v0.2",
   generatedAt: new Date().toISOString(),
 });
 
@@ -52,6 +47,8 @@ export interface MockQwenPawIO {
   response: Record<string, unknown>;
 }
 
+// This is the frontend-only trace used when the backend is unavailable. Real QwenPaw
+// execution lives behind POST /api/agent/analyze, which rebuilds and validates context.
 export const buildMockQwenPawIO = (
   profile: ElderProfile,
   baseline: PersonalBaseline,
@@ -61,48 +58,44 @@ export const buildMockQwenPawIO = (
   summaries: AgentRoleSummaries,
 ): MockQwenPawIO => ({
   request: {
-    elder: `${profile.name}，${profile.age}岁，${
-      profile.chronicConditions.join("、") || "无慢病标签"
-    }`,
+    elder: {
+      elder_id: profile.elderId,
+      display_name: profile.name,
+      age: profile.age,
+    },
     baseline: {
-      avgSteps7d: baseline.avgSteps7d,
-      avgSleep7d: baseline.avgSleep7d,
-      restingHrBaseline: baseline.restingHrBaseline,
+      avg_steps_7d: baseline.avgSteps7d,
+      avg_sleep_7d: baseline.avgSleep7d,
+      resting_hr_baseline: baseline.restingHrBaseline,
     },
     snapshot: {
-      stepsToday: snapshot.stepsToday,
-      sleepDuration: snapshot.sleepDuration,
-      medicationEvening: snapshot.medicationEvening,
-      dataCompleteness: snapshot.dataCompleteness,
+      steps: snapshot.stepsToday,
+      sleep_duration: snapshot.sleepDuration,
+      data_quality: snapshot.dataQuality,
+      wear_time_hours: snapshot.wearTimeHours,
     },
     events: events
       .filter((event) =>
-        ["voice_symptom", "sos", "fall_detected", "location_alert"].includes(
+        ["voice_symptom", "sos", "sos_long_press", "fall_detected", "location_alert"].includes(
           event.eventType,
         ),
       )
       .map((event) => ({
-        eventType: event.eventType,
-        rawText: event.rawText,
+        event_type: event.eventType,
+        raw_text: event.rawText,
         payload: event.payload,
       })),
-    riskResult: {
-      riskLevel: riskResult.riskLevel,
-      riskScore: riskResult.riskScore,
+    risk_result: {
+      status_level: riskResult.riskLevel,
+      risk_score: riskResult.riskScore,
+      key_reasons: riskResult.keyReasons,
     },
   },
   response: {
-    caregiverSummary: summaries.caregiverSummary,
-    familySummary: summaries.familySummary,
-    institutionSummary: summaries.institutionSummary,
-    recommendedAction: riskResult.recommendedAction,
-    medicalDisclaimer: riskResult.medicalDisclaimer,
+    caregiver_summary: summaries.caregiverSummary,
+    family_summary: summaries.familySummary,
+    institution_summary: summaries.institutionSummary,
+    recommended_action: riskResult.recommendedAction,
+    safety_disclaimer: riskResult.medicalDisclaimer,
   },
 });
-
-/*
-  后续接入 QwenPaw 时，可实现 QwenPawAgentAdapter：
-  1. 将老人档案、今日快照、RiskResult 和事件摘要序列化为 AgentRequest。
-  2. 调用真实 QwenPaw / 大模型服务生成不同角色文案。
-  3. 保留 riskEngine 的结构化结果作为可审计输入，避免摘要成为黑盒判断。
-*/

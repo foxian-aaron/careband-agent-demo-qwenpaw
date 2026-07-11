@@ -4,114 +4,65 @@ export const DocsPage = () => (
   <div className="page docs-page">
     <header className="page-header">
       <div>
-        <span>文档页</span>
-        <h1>智护环 CareBand Agent Demo 说明</h1>
-        <p>评委和团队成员可在这里快速理解 Demo 剧本、数据、规则和后续扩展。</p>
+        <span>项目说明 / Demo Evidence</span>
+        <h1>智护环 CareBand Agent v0.2</h1>
+        <p>这里说明当前真正跑通的链路、可见 fallback，以及仍需要外部条件的实体与真实 Agent 验收。</p>
       </div>
     </header>
 
     <section className="panel docs-section">
-      <h2>Demo v0.2 落地验证扩展</h2>
-      <ul className="insight-list">
-        <li>长者记忆初始化：`#/elder/E001/memory-intake`，支持资料粘贴、Mock AI 提取、人工确认和保存。</li>
-        <li>穿戴导入模拟：`#/elder/E001/wearable-import`，CSV 导入后回写 DailySnapshot、趋势和设备状态。</li>
-        <li>硬件模拟：`#/hardware-simulator`，支持 SOS、跌倒、无回应、设备未佩戴、低电量和重新佩戴。</li>
-        <li>Agent Trace：驾驶舱和 Demo Control 展示 request、response、Mock / Future QwenPaw 标签和 fallback。</li>
-        <li>隐私授权与试点计划：`#/privacy` 和 `#/pilot-plan` 展示数据边界、角色权限和试点路径。</li>
-      </ul>
-    </section>
-
-    <section className="panel docs-section">
-      <h2>Demo 剧本</h2>
+      <h2>比赛主链路</h2>
       <ol>
-        <li>从机构端查看 seeded demo 列表，区分 TEST001 Apple Watch 测试资料和 E001 陈伯照护闭环。</li>
-        <li>进入陈伯驾驶舱，展示个人基线、今日偏离和 Decision Trace。</li>
-        <li>进入记忆初始化页，生成并保存陈伯初始照护记忆，返回驾驶舱查看标签。</li>
-        <li>进入穿戴导入页，导入陈伯 7 天 CSV 示例数据，返回驾驶舱查看趋势和设备状态。</li>
-        <li>在 Demo 控制台或硬件模拟器触发“我有点头晕”、SOS、跌倒、离开安全区等事件。</li>
-        <li>切回护工端，查看高优先级任务“陈伯需要立即查看”。</li>
-        <li>切到家属端，展示温和安心卡和“护工已收到提醒”。</li>
-        <li>护工接单、标记已查看、确认晚药、完成处理。</li>
-        <li>回到机构端和家属端，展示“已跟进 / 持续观察”，同时保留今日曾出现高风险事件的说明。</li>
+        <li>机构端查看多长者风险热力图，并进入陈伯 E001 驾驶舱。</li>
+        <li>展示 DailySnapshot、数据来源、质量、七日个人基线和当日偏离。</li>
+        <li>通过硬件模拟器或实体 ESP32 提交规范 SOS / 确认事件。</li>
+        <li>后端入库并由确定性规则引擎计算六级风险；SOS 必须升级为 urgent。</li>
+        <li>Agent 只生成护工、家属和机构三端摘要，不得修改规则结果。</li>
+        <li>护工接单、查看、确认用药并完成任务；关联事件同步解决。</li>
+        <li>家属安心卡和机构统计刷新为已跟进状态。</li>
       </ol>
     </section>
 
     <section className="panel docs-section">
-      <h2>数据结构说明</h2>
+      <h2>当前实现状态</h2>
+      <ul className="insight-list">
+        <li>CSV：真实文件选择、预览、确认、幂等覆盖、错误提示与导入历史。</li>
+        <li>Apple Health：TEST001 团队聚合数据，仅作技术证据，不计入机构运营人数。</li>
+        <li>事件：七种规范类型，旧事件名只在 API 入口兼容；模拟器以 source=mock 明确标识。</li>
+        <li>Agent：已实现 qwenpaw / openai / mock Provider、SSE、重试、Schema 与安全校验。</li>
+        <li>Fallback：真实 Provider 离线、超时、凭据失败或输出不合法时，明确显示 Mock fallback。</li>
+        <li>硬件：ESP32-S3 固件可编译；实体按钮、LED、震动和 Wi-Fi 闭环仍需接板验收。</li>
+      </ul>
+    </section>
+
+    <section className="panel docs-section">
+      <h2>风险与数据边界</h2>
       <p>
-        Demo 使用 ElderProfile、ElderProfileDetail、ConsentStatus、ContactPerson、
-        PersonalBaseline、DailySnapshot、MedicationPlan、MedicationDose、CareEvent、
-        RiskResult、CareTask 和 AgentRoleSummaries 组织数据。v0.2 加入 Apple Health
-        DailySnapshot、后端 API、Agent fallback 和静态预览说明，并保持
-        careLoopStatus / displayStatus 与 riskLevel 分层。
+        风险状态固定为 data_insufficient、stable、observation、attention、high_risk 和 urgent。
+        规则引擎先处理 SOS、高置信跌倒和数据不足，再比较步数、睡眠、静息心率、活动分钟、症状与用药确认。
+        已解决或过期事件不会继续抬高风险。
+      </p>
+      <p>
+        Agent 只接收每日聚合快照、七日基线、已脱敏事件和规则结果。原始 Apple Health XML、完整语音、精确坐标、地址、密钥和内部档案不会进入模型输入。
       </p>
     </section>
 
     <section className="panel docs-section">
-      <h2>公網靜態預覽說明</h2>
+      <h2>QwenPaw 真实状态</h2>
       <p>
-        GitHub Pages 只能部署靜態前端，因此 /v0.2/ 公網鏈接使用 mock fallback。
-        完整 Express + SQLite + Agent 後端需要本地或 Node hosting 啟動。
-        TEST001 是團隊 Apple Watch 測試資料，非真實長者；E001 陳伯才是主照護閉環 Demo。
+        后端已经连接本机 QwenPaw 的 <code>/api/agent/process</code> SSE 接口，并使用专用
+        <code>careband_summary_agent</code>。当前机器的阿里模型凭据返回 401，因此现有页面和录像会诚实显示
+        <strong>Mock fallback</strong>；更新凭据并出现 provider=qwenpaw、fallback=false、validation=valid 后，才算真实 Agent 验收通过。
       </p>
     </section>
 
     <section className="panel docs-section">
-      <h2>风险规则说明</h2>
+      <h2>记忆与隐私</h2>
       <p>
-        规则引擎先检查 SOS、跌倒、离开安全区和严重主诉等硬事件；没有硬事件时再判断
-        数据完整度；之后按个人步数基线、睡眠基线、晚药确认、主动症状反馈和慢病标签
-        计算日常偏离，并输出可解释原因和建议动作。
+        记忆初始化当前只做文字 Mock 提取。每条草稿必须人工确认或拒绝后才能保存；只保存确认项，并从确认项重建风险关注、沟通、用药和家属通知偏好。AI 草稿不能直接修改风险，也不构成医疗记录。
       </p>
-    </section>
-
-    <section className="panel docs-section">
-      <h2>事件流说明</h2>
-      <pre>{`模拟数据 / 事件输入
-  ↓
-读取老人档案、用药计划和个人基线
-  ↓
-用药提醒 / 用药确认事件写入 CareEvent
-  ↓
-检查硬事件
-  ↓
-检查数据完整度
-  ↓
-计算日常偏离
-  ↓
-风险引擎输出 riskLevel
-  ↓
-deriveDisplayStatus 输出前台展示状态
-  ↓
-Mock AI Agent 生成三端摘要
-  ↓
-护工端生成任务
-  ↓
-家属端显示安心卡
-  ↓
-机构端更新热力图
-  ↓
-护工接单 / 查看 / 确认用药 / 完成处理
-  ↓
-三端同步更新`}</pre>
-    </section>
-
-    <section className="panel docs-section">
-      <h2>页面说明</h2>
       <p>
-        机构端负责群体风险排序，护工端负责待办处理，长者驾驶舱负责解释状态变化，
-        老人档案页展示长期档案和授权状态，用药计划页展示提醒与确认记录，
-        家属端负责温和同步，Demo 控制台负责路演推进。
-      </p>
-    </section>
-
-    <section className="panel docs-section">
-      <h2>后续接入 QwenPaw / 硬件</h2>
-      <p>
-        陈伯驾驶舱已加入 QwenPaw-style Agent IO 面板。当前 provider 为 mock/OpenAI fallback；
-        后续可在 /api/agent/analyze 后端实现替换为 QwenPaw-compatible endpoint；
-        硬件侧计划通过原型传感器模块或手环式原型，将心率趋势、步数、睡眠参考、
-        佩戴时间、安全区状态和 SOS 事件映射为 DailySnapshot 与 CareEvent。
+        位置默认只保存区域与安全区状态；语音只保存限长摘要；录音同意、撤回和删除模板位于项目文档中。这些模板不构成法律意见。
       </p>
     </section>
 

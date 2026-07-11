@@ -391,6 +391,7 @@ export interface BackendAgentRun {
   elder_id: string;
   source_event_id?: string | null;
   provider: "mock" | "qwenpaw" | "openai";
+  requested_provider?: "mock" | "qwenpaw" | "openai";
   model?: string | null;
   duration_ms?: number | null;
   validation_status: "valid" | "fallback_valid" | "failed";

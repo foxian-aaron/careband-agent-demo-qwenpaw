@@ -7,11 +7,58 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $promptRoot = Join-Path $repoRoot 'integrations\qwenpaw'
-$workspaceRoot = Join-Path $HOME ".qwenpaw\workspaces\$AgentId"
+$qwenHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+$workspaceRoot = Join-Path $qwenHome ".qwenpaw\workspaces\$AgentId"
 $agentConfigPath = Join-Path $workspaceRoot 'agent.json'
 
 if (-not (Test-Path -LiteralPath $agentConfigPath)) {
-  throw "QwenPaw agent '$AgentId' does not exist. Create it with qwenpaw agents create first."
+  $qwenCommand = (Get-Command qwenpaw -ErrorAction SilentlyContinue).Source
+  if (-not $qwenCommand) {
+    throw "QwenPaw is not installed or is not on PATH. Cannot create agent '$AgentId'."
+  }
+
+  function Test-LocalQwenPawReady {
+    try {
+      $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8088/api/agent/health' -TimeoutSec 2 -UseBasicParsing
+      return $response.StatusCode -ge 200 -and $response.StatusCode -lt 500
+    } catch {
+      return $false
+    }
+  }
+
+  $startedHere = $false
+  $qwenProcess = $null
+  if (-not (Test-LocalQwenPawReady)) {
+    $qwenProcess = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $qwenCommand,
+      'app', '--host', '127.0.0.1', '--port', '8088', '--log-level', 'warning'
+    ) -WindowStyle Hidden -PassThru
+    $startedHere = $true
+    for ($attempt = 0; $attempt -lt 30 -and -not (Test-LocalQwenPawReady); $attempt += 1) {
+      Start-Sleep -Milliseconds 500
+    }
+  }
+
+  try {
+    if (-not (Test-LocalQwenPawReady)) {
+      throw 'QwenPaw local API did not become ready on 127.0.0.1:8088.'
+    }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $qwenCommand `
+      --host 127.0.0.1 --port 8088 agent create `
+      --name 'CareBand Summary Agent' `
+      --agent-id $AgentId `
+      --description 'CareBand rule-result-aware three-role summary Agent. It never decides medical risk.' `
+      --template default `
+      --provider-id $ProviderId `
+      --model-id $ModelId
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $agentConfigPath)) {
+      throw "QwenPaw failed to create agent '$AgentId'."
+    }
+  } finally {
+    if ($startedHere -and $qwenProcess -and -not $qwenProcess.HasExited) {
+      Stop-Process -Id $qwenProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+  }
 }
 
 $config = Get-Content -Raw -Encoding utf8 -LiteralPath $agentConfigPath | ConvertFrom-Json

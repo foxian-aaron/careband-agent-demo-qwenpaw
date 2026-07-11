@@ -17,6 +17,9 @@
 
 - [ ] `pio test -e native` 全部通过，输出已保存。
 - [ ] `pio run -e esp32-s3-devkitc-1` 编译通过，输出已保存。
+- [x] 软件侧 LAN 路由检查通过：局域网 `health=200`、`events=201`，`dashboard/snapshots=403`，局域网前端 `404`；本机页面与 Dashboard 仍为 `200`。
+- [x] 仅通过 LAN `POST /api/events` 提交虚构 ESP32 SOS 后，后端在 7 ms 内返回 `queued`，并生成与该 `event_id` 对齐的 `urgent` Mock fallback 摘要；这不等同于实体按键验收。
+- [ ] 使用 `start-demo.ps1 -HardwareMode` 启动；终端打印的 LAN `/api/events` URL 与 `config_local.h` 完全一致，且电脑和 ESP32 位于同一可信私有局域网。
 - [ ] 串口逐行 JSON 可解析；状态行含 `led`、`vibration`、`wifi`、`queue_size`，且无 Wi-Fi 密码、密钥或精确位置。
 - [ ] 后端 Demo 已重置，E001 使用虚构数据。
 

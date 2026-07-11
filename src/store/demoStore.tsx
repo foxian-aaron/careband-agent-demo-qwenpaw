@@ -48,6 +48,11 @@ import {
 } from "../lib/careTaskWorkflow";
 import { deriveCareLoopStatus, deriveDisplayStatus } from "../lib/displayStatus";
 import {
+  buildConfirmedCareMemory,
+  composeProfileRiskTags,
+  inferLegacyProfileBaseRiskTags,
+} from "../lib/memoryConfirmation";
+import {
   resolveDashboardAgentState,
   type AgentRunViewState,
 } from "../lib/agentOutputState";
@@ -111,6 +116,7 @@ type BackendStatus = {
 
 export interface DemoState {
   profiles: Record<string, ElderProfile>;
+  profileBaseRiskTagsByElderId: Record<string, string[]>;
   baselines: Record<string, PersonalBaseline>;
   snapshots: Record<string, DailySnapshot>;
   medicationPlans: Record<string, MedicationPlan>;
@@ -213,6 +219,7 @@ export type DemoAction =
 interface DemoContextValue {
   state: DemoState;
   dispatch: Dispatch<DemoAction>;
+  refreshDashboard: () => Promise<void>;
 }
 
 const DemoContext = createContext<DemoContextValue | null>(null);
@@ -220,6 +227,12 @@ const DemoContext = createContext<DemoContextValue | null>(null);
 const toRecord = <T extends { elderId: string }>(items: T[]) =>
   items.reduce<Record<string, T>>((record, item) => {
     record[item.elderId] = item;
+    return record;
+  }, {});
+
+const toProfileBaseRiskTagRecord = (profiles: ElderProfile[]) =>
+  profiles.reduce<Record<string, string[]>>((record, profile) => {
+    record[profile.elderId] = [...profile.riskTags];
     return record;
   }, {});
 
@@ -441,7 +454,7 @@ const mapBackendAgentOutput = (
   safetyDisclaimer: output.safety_disclaimer,
   keyReasons: output.key_reasons,
   agentSource: output.agent_source,
-  requestedProvider: run?.provider,
+  requestedProvider: run?.requested_provider ?? run?.provider,
   model: run?.model,
   durationMs: run?.duration_ms,
   validationStatus: run?.validation_status,
@@ -470,6 +483,7 @@ const mapDashboardToDemoState = (
   fallback: DemoState,
 ): Partial<DemoState> => {
   const profiles: Record<string, ElderProfile> = {};
+  const profileBaseRiskTagsByElderId: Record<string, string[]> = {};
   const baselines: Record<string, PersonalBaseline> = {};
   const snapshots: Record<string, DailySnapshot> = {};
   const tasks: CareTask[] = [];
@@ -482,6 +496,8 @@ const mapDashboardToDemoState = (
 
   for (const row of dashboard.elders) {
     const elderId = row.elder.elder_id;
+    const profileBaseRiskTags = [...row.elder.risk_tags];
+    profileBaseRiskTagsByElderId[elderId] = profileBaseRiskTags;
     profiles[elderId] = {
       elderId,
       name: row.elder.name,
@@ -489,7 +505,10 @@ const mapDashboardToDemoState = (
       room: row.elder.room,
       floor: fallback.profiles[elderId]?.floor ?? "二楼",
       chronicConditions: fallback.profiles[elderId]?.chronicConditions ?? [],
-      riskTags: row.elder.risk_tags,
+      riskTags: composeProfileRiskTags(
+        profileBaseRiskTags,
+        fallback.initialCareMemoryByElderId[elderId]?.riskTags ?? [],
+      ),
       caregiverId: fallback.profiles[elderId]?.caregiverId ?? "CG-A",
       familyContactId: fallback.profiles[elderId]?.familyContactId ?? `FAM-${elderId}`,
       subjectKind:
@@ -577,6 +596,7 @@ const mapDashboardToDemoState = (
 
   return {
     profiles,
+    profileBaseRiskTagsByElderId,
     baselines,
     snapshots: { ...fallback.snapshots, ...snapshots },
     events,
@@ -591,6 +611,7 @@ const mapDashboardToDemoState = (
 
 export const createInitialDemoState = (): DemoState => ({
   profiles: toRecord(clone(mockProfiles)),
+  profileBaseRiskTagsByElderId: toProfileBaseRiskTagRecord(clone(mockProfiles)),
   baselines: toRecord(clone(mockBaselines)),
   snapshots: toRecord(
     clone(mockSnapshots).map((snapshot: DailySnapshot) => ({
@@ -1258,15 +1279,11 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
     case "SAVE_INITIAL_CARE_MEMORY": {
       const draft = state.memoryDraftsByElderId[action.elderId];
       if (!draft) return state;
-      const saved: InitialCareMemory = {
-        ...draft,
-        updatedAt: isoNow(),
-        items: draft.items.filter((item) => item.confirmationStatus !== "rejected"),
-      };
+      const saved = buildConfirmedCareMemory(draft, isoNow());
+      if (!saved) return state;
       const profile = state.profiles[action.elderId];
-      const riskTags = Array.from(
-        new Set([...(profile?.riskTags ?? []), ...saved.riskTags]),
-      );
+      const profileBaseRiskTags =
+        state.profileBaseRiskTagsByElderId[action.elderId] ?? profile?.riskTags ?? [];
       return {
         ...state,
         profiles: profile
@@ -1274,10 +1291,14 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
               ...state.profiles,
               [action.elderId]: {
                 ...profile,
-                riskTags,
+                riskTags: composeProfileRiskTags(profileBaseRiskTags, saved.riskTags),
               },
             }
           : state.profiles,
+        profileBaseRiskTagsByElderId: {
+          ...state.profileBaseRiskTagsByElderId,
+          [action.elderId]: profileBaseRiskTags,
+        },
         initialCareMemoryByElderId: {
           ...state.initialCareMemoryByElderId,
           [action.elderId]: saved,
@@ -1289,7 +1310,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
       };
     }
     case "IMPORT_WEARABLE_DATA": {
-      const latest = latestWearableSnapshot(action.snapshots);
+      const importedLatest = latestWearableSnapshot(action.snapshots);
       const previousImports = state.wearableImports[action.elderId] ?? [];
       const importRecord: WearableImportRecord = {
         importId: `IMP-${action.elderId}-${Date.now()}`,
@@ -1300,10 +1321,15 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
         snapshots: action.snapshots,
       };
       const currentSnapshot = state.snapshots[action.elderId];
+      const latest =
+        importedLatest &&
+        (!currentSnapshot || importedLatest.date.localeCompare(currentSnapshot.date) >= 0)
+          ? importedLatest
+          : undefined;
       const currentDevice = state.deviceRecords[action.elderId];
       const trend = state.trends[action.elderId];
       const updatedTrend =
-        trend && action.snapshots.length
+        trend && latest && action.snapshots.length
           ? {
               ...trend,
               points: action.snapshots.slice(-7).map((point) => ({
@@ -1334,7 +1360,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
                   ...currentSnapshot,
                   id: latest.id,
                   date: latest.date,
-                  dataSource: action.source,
+                  dataSource: latest.dataSource,
                   heartRate: latest.heartRateAvg,
                   restingHeartRate: latest.restingHeartRate,
                   stepsToday: latest.steps,
@@ -1365,7 +1391,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
                   wearStatus: (latest.wearTimeHours ?? 0) >= 6 ? "worn" : "not_worn",
                   lastSyncAt: latest.importedAt ?? currentDevice.lastSyncAt,
                   dataQuality: latest.dataQuality,
-                  dataSource: action.source,
+                  dataSource: latest.dataSource,
                   todayWearTimeHours: latest.wearTimeHours ?? 0,
                 },
               }
@@ -1758,74 +1784,100 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
   }
 };
 
+export const migratePersistedDemoState = (parsed: Partial<DemoState>): DemoState => {
+  const initial = createInitialDemoState();
+  const migratedSnapshots = parsed.snapshots
+    ? Object.fromEntries(
+        Object.entries(parsed.snapshots).map(([elderId, snapshot]) => [
+          elderId,
+          {
+            ...snapshot,
+            dataQuality: migratePersistedDataQuality(snapshot.dataQuality),
+          },
+        ]),
+      )
+    : {};
+  const initialCareMemoryByElderId =
+    parsed.initialCareMemoryByElderId ?? initial.initialCareMemoryByElderId;
+  const loadedProfiles = { ...initial.profiles, ...parsed.profiles };
+  const profileBaseRiskTagsByElderId: Record<string, string[]> = {};
+  const profiles = Object.fromEntries(
+    Object.entries(loadedProfiles).map(([elderId, profile]) => {
+      const memoryDerivedRiskTags =
+        initialCareMemoryByElderId[elderId]?.riskTags ?? [];
+      const profileBaseRiskTags =
+        parsed.profileBaseRiskTagsByElderId?.[elderId] ??
+        initial.profileBaseRiskTagsByElderId[elderId] ??
+        inferLegacyProfileBaseRiskTags(profile.riskTags, memoryDerivedRiskTags);
+      profileBaseRiskTagsByElderId[elderId] = [...profileBaseRiskTags];
+      return [
+        elderId,
+        {
+          ...profile,
+          riskTags: composeProfileRiskTags(profileBaseRiskTags, memoryDerivedRiskTags),
+        },
+      ];
+    }),
+  );
+  return {
+    ...initial,
+    ...parsed,
+    profiles,
+    profileBaseRiskTagsByElderId,
+    baselines: { ...initial.baselines, ...parsed.baselines },
+    snapshots: { ...initial.snapshots, ...migratedSnapshots },
+    medicationPlans: { ...initial.medicationPlans, ...parsed.medicationPlans },
+    contacts: { ...initial.contacts, ...parsed.contacts },
+    profileDetails: { ...initial.profileDetails, ...parsed.profileDetails },
+    trends: { ...initial.trends, ...parsed.trends },
+    events: parsed.events ?? initial.events,
+    tasks: parsed.tasks ?? initial.tasks,
+    operationalStates: { ...initial.operationalStates, ...parsed.operationalStates },
+    backendRiskResults: { ...initial.backendRiskResults, ...parsed.backendRiskResults },
+    agentOutputs: { ...initial.agentOutputs, ...parsed.agentOutputs },
+    agentRunStates: { ...initial.agentRunStates, ...parsed.agentRunStates },
+    backend: parsed.backend ?? initial.backend,
+    initialCareMemoryByElderId,
+    memoryDraftsByElderId:
+      parsed.memoryDraftsByElderId ?? initial.memoryDraftsByElderId,
+    wearableImports: parsed.wearableImports ?? initial.wearableImports,
+    deviceRecords: parsed.deviceRecords ?? initial.deviceRecords,
+    agentMode: parsed.agentMode ?? initial.agentMode,
+    agentTraces: parsed.agentTraces ?? initial.agentTraces,
+    mockBackendLogs: parsed.mockBackendLogs ?? initial.mockBackendLogs,
+    consentRecords: parsed.consentRecords ?? initial.consentRecords,
+    pilotPlanStatus: parsed.pilotPlanStatus ?? initial.pilotPlanStatus,
+    weeklySummaries: parsed.weeklySummaries ?? initial.weeklySummaries,
+  };
+};
+
 const loadInitialState = () => {
   if (typeof window === "undefined") return createInitialDemoState();
   const saved = window.localStorage.getItem(storageKey);
   if (!saved) return createInitialDemoState();
   try {
-    const parsed = JSON.parse(saved) as Partial<DemoState>;
-    const initial = createInitialDemoState();
-    const migratedSnapshots = parsed.snapshots
-      ? Object.fromEntries(
-          Object.entries(parsed.snapshots).map(([elderId, snapshot]) => [
-            elderId,
-            {
-              ...snapshot,
-              dataQuality: migratePersistedDataQuality(snapshot.dataQuality),
-            },
-          ]),
-        )
-      : {};
-    return {
-      ...initial,
-      ...parsed,
-      profiles: { ...initial.profiles, ...parsed.profiles },
-      baselines: { ...initial.baselines, ...parsed.baselines },
-      snapshots: { ...initial.snapshots, ...migratedSnapshots },
-      medicationPlans: { ...initial.medicationPlans, ...parsed.medicationPlans },
-      contacts: { ...initial.contacts, ...parsed.contacts },
-      profileDetails: { ...initial.profileDetails, ...parsed.profileDetails },
-      trends: { ...initial.trends, ...parsed.trends },
-      events: parsed.events ?? initial.events,
-      tasks: parsed.tasks ?? initial.tasks,
-      operationalStates: { ...initial.operationalStates, ...parsed.operationalStates },
-      backendRiskResults: { ...initial.backendRiskResults, ...parsed.backendRiskResults },
-      agentOutputs: { ...initial.agentOutputs, ...parsed.agentOutputs },
-      agentRunStates: { ...initial.agentRunStates, ...parsed.agentRunStates },
-      backend: parsed.backend ?? initial.backend,
-      initialCareMemoryByElderId:
-        parsed.initialCareMemoryByElderId ?? initial.initialCareMemoryByElderId,
-      memoryDraftsByElderId:
-        parsed.memoryDraftsByElderId ?? initial.memoryDraftsByElderId,
-      wearableImports: parsed.wearableImports ?? initial.wearableImports,
-      deviceRecords: parsed.deviceRecords ?? initial.deviceRecords,
-      agentMode: parsed.agentMode ?? initial.agentMode,
-      agentTraces: parsed.agentTraces ?? initial.agentTraces,
-      mockBackendLogs: parsed.mockBackendLogs ?? initial.mockBackendLogs,
-      consentRecords: parsed.consentRecords ?? initial.consentRecords,
-      pilotPlanStatus: parsed.pilotPlanStatus ?? initial.pilotPlanStatus,
-      weeklySummaries: parsed.weeklySummaries ?? initial.weeklySummaries,
-    };
+    return migratePersistedDemoState(JSON.parse(saved) as Partial<DemoState>);
   } catch {
     return createInitialDemoState();
   }
 };
 
-const normalizedHardwareEvent = (
+export const normalizedHardwareEvent = (
   elderId: string,
   eventType: CareEvent["eventType"],
 ): BackendEventInput => {
   const common = {
     elder_id: elderId,
-    source: "esp32",
+    source: "mock",
     timestamp: new Date().toISOString(),
   };
+  const simulationMarker = { simulated_device: "esp32" };
   if (eventType === "button_confirm") {
     return {
       ...common,
       event_type: "medication",
       raw_text: "Short press confirmation",
-      payload: { action: "confirmed", button_pattern: "short_press" },
+      payload: { ...simulationMarker, action: "confirmed", button_pattern: "short_press" },
     };
   }
   if (eventType === "sos_long_press" || eventType === "sos_triple_press" || eventType === "sos") {
@@ -1834,6 +1886,7 @@ const normalizedHardwareEvent = (
       event_type: "sos",
       raw_text: "CareBand SOS request",
       payload: {
+        ...simulationMarker,
         action: eventType === "sos_triple_press" ? "triple_press" : "long_press",
         button_pattern: eventType === "sos_triple_press" ? "triple_press" : "long_press",
       },
@@ -1850,7 +1903,11 @@ const normalizedHardwareEvent = (
       ...common,
       event_type: "fall",
       raw_text: "CareBand fall signal requiring human verification",
-      payload: { action, confidence: eventType === "fall_detected" ? 0.9 : 0.85 },
+      payload: {
+        ...simulationMarker,
+        action,
+        confidence: eventType === "fall_detected" ? 0.9 : 0.85,
+      },
     };
   }
   const deviceActions: Record<string, string> = {
@@ -1864,7 +1921,7 @@ const normalizedHardwareEvent = (
     ...common,
     event_type: "device_status",
     raw_text: "CareBand device status update",
-    payload: { action: deviceActions[eventType] ?? "status_update" },
+    payload: { ...simulationMarker, action: deviceActions[eventType] ?? "status_update" },
   };
 };
 
@@ -2221,7 +2278,10 @@ export const DemoProvider = ({ children }: { children: ReactNode }) => {
     window.localStorage.setItem(storageKey, JSON.stringify(state));
   }, [state]);
 
-  const value = useMemo(() => ({ state, dispatch }), [state]);
+  const value = useMemo(
+    () => ({ state, dispatch, refreshDashboard }),
+    [state, dispatch, refreshDashboard],
+  );
 
   return <DemoContext.Provider value={value}>{children}</DemoContext.Provider>;
 };
@@ -2272,6 +2332,7 @@ export const getAgentSummariesForElder = (
       mock: agentOutput.fallbackUsed ? "Mock fallback" : "确定性 Mock",
     }[agentOutput.agentSource];
     return {
+      outputId: agentOutput.outputId,
       caregiverSummary: agentOutput.caregiverSummary,
       familySummary: agentOutput.familySummary,
       institutionSummary: agentOutput.institutionSummary,

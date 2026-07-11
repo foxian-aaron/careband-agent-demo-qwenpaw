@@ -80,3 +80,43 @@ test("QwenPaw provider surfaces a failed SSE event instead of hiding it", async 
     /MODEL_UNAUTHORIZED_ACCESS: Model token expired/,
   );
 });
+
+test("QwenPaw provider times out instead of hanging the demo", async (t) => {
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.write("data: {}\n\n");
+  });
+  t.after(() => server.close());
+  const address = await listen(server);
+
+  await assert.rejects(
+    () =>
+      runQwenPawAgent(
+        { elder_profile: { elder_id: "E001" }, risk_result: {} },
+        { baseUrl: `http://127.0.0.1:${address.port}`, timeoutMs: 20 },
+      ),
+    /timed out after 20ms/,
+  );
+});
+
+test("QwenPaw provider rejects a final prose or malformed JSON response", async (t) => {
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.end(
+      `data: ${JSON.stringify({
+        output: [{ content: [{ type: "text", text: "Here is the answer: not JSON" }] }],
+      })}\n\n`,
+    );
+  });
+  t.after(() => server.close());
+  const address = await listen(server);
+
+  await assert.rejects(
+    () =>
+      runQwenPawAgent(
+        { elder_profile: { elder_id: "E001" }, risk_result: {} },
+        { baseUrl: `http://127.0.0.1:${address.port}`, timeoutMs: 1000 },
+      ),
+    /final output was not JSON-only/,
+  );
+});

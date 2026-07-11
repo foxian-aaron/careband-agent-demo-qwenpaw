@@ -1,87 +1,49 @@
-# Apple Health 匯入安全報告
+# Apple Health / CSV Import Evidence
 
-## 匯入來源與隱私確認
+## Data boundary
 
-- 使用檔案：本機 Apple Health 匯出 zip，解壓後使用 `private_data/apple_health/apple_health_export/` 內的主健康 XML。
-- 原始檔保護：`private_data/`、`*.zip`、`export.xml`、`apple_health_export/`、SQLite、`.env`、`uploads/` 均已加入 `.gitignore`。
-- 本報告只包含每日聚合後的匿名化摘要，不包含 raw XML、Apple ID、個人 profile、臨床紀錄或原始心率時間序列。
-- 匯入對象：`TEST001`，前端標示為「團隊成員 Apple Watch 測試資料 / 非真實長者資料」。
-- Agent 分析只使用每日聚合 snapshot、risk_result 與事件摘要，未使用 raw Apple Health XML。
+- The test subject is `TEST001`, marked `subject_kind=team_test`; it is not real elder-care data.
+- Raw Apple Health XML, Apple ID, raw heart-rate series, `.env`, SQLite and upload files are ignored and never sent to the Agent.
+- Only per-day aggregates are stored as `DailySnapshot`.
+- `TEST001` remains visible as technical evidence but is excluded from institution operating counts and the caregiver queue.
 
-## 匯入方法
+## Normalized fields
 
-- Preview：使用 streaming CLI 讀取大型 XML，避免把約 985 MB XML 一次載入記憶體。
-- Derived CSV：已生成 `private_data/derived/apple_watch_daily_snapshots.csv`，只包含 DailySnapshot 聚合欄位。
-- DB 匯入：使用 `POST /api/import/daily-snapshots-csv` 匯入最近 14 天資料。
-- Snapshot id：Apple Health 匯入資料使用 `APPLE-TEST001-YYYY-MM-DD`，避免重複匯入產生 duplicate latest。
-- Step source strategy：`prefer_watch`，同日同時有 Apple Watch 與 iPhone 步數時，預設使用 Apple Watch 步數並提出 warning。
-- Sleep grouping strategy：`wake_date`，跨午夜睡眠歸到醒來當天；只統計 asleep 類別，不統計 InBed / Awake。
+```text
+elder_id, date, data_source,
+heart_rate_avg, resting_heart_rate, steps, active_minutes,
+sleep_duration, wear_time_hours, data_quality
+```
 
-## 匯入摘要
+`data_quality` is 0-100 in API/SQLite and converted once to 0-1 inside the frontend. Missing metrics remain `null`; the importer does not fabricate zeroes, resting heart rate or import timestamps.
 
-- Preview 偵測天數：1239 天
-- Preview 日期範圍：2023-01-26 至 2026-06-19
-- 實際匯入天數：14 天
-- 實際匯入日期範圍：2026-06-06 至 2026-06-19
-- 最新 snapshot：2026-06-19，data_source = Apple Health Export，data_quality = 85
-- data_quality 範圍：25 至 100
-- 步數範圍：1099 至 35006
-- 平均心率範圍：67 至 115.5 bpm
-- 靜息心率範圍：58 至 87 bpm
-- 睡眠時長範圍：4.25 至 8.54 小時
-- 活動分鐘範圍：1 至 39 分鐘
+Allowed current sources are `Apple Health Export` and `CSV Import`; demo seed/control sources are reserved for synthetic E001-E004 data. Other wearable platforms remain future integrations.
 
-## Warnings
+## Import behavior
 
-- XML 很大，demo 已使用 streaming parser；正式產品仍建議採 streaming/queue import。
-- Apple Health 日期包含 timezone offset；數量型資料依記錄中的本地 start date 分組，睡眠依 wake date 分組。
-- 同時偵測到 Apple Watch 與 iPhone 來源；目前以 `prefer_watch` 避免預設雙重計步，仍建議人工檢查異常高步數日。
-- 最近 14 天中有 1 天缺少平均心率，6 天缺少 asleep sleep duration。
-- 2026-06-10、2026-06-14 步數超過 30000，已標記為需人工確認。
-- 2026-06-17 data_quality = 25，低於 40，若作為最新日會被視為 insufficient_data。
+- Preview is read-only.
+- Confirm writes an `import_runs` audit record.
+- The same elder/date is idempotently replaced, not duplicated.
+- Apple Health snapshot IDs use `APPLE-<elder>-YYYY-MM-DD`.
+- The latest dashboard trend contains seven distinct dates.
+- The personal seven-day baseline excludes the current snapshot date.
+- `data_quality < 40` or wear time below six hours produces `data_insufficient` unless an unresolved emergency event exists.
 
-## Dashboard QA
+## Apple Health derivation
 
-- `/api/dashboard` 可看到 `TEST001`。
-- `TEST001` latest snapshot 顯示：
-  - date = 2026-06-19
-  - data_source = Apple Health Export
-  - data_quality = 85
-  - baseline_label = 7日基線
-  - usable_days = 7
-- 前端 QA 已確認：
-  - 後端已連接
-  - 機構端顯示 TEST001 與 Apple Health Export
-  - GitHub Pages `/v0.2/` 標示為靜態預覽，使用 mock fallback，不宣稱後端在線
-  - `/v0.2/#/elder/TEST001` 在靜態 fallback 下顯示 TEST001，不會誤顯示陳伯
-  - `/v0.2/#/elder/UNKNOWN` 顯示「資料未載入：找不到此長者資料。」
-  - TEST001 詳情頁顯示 snapshot date、data_quality、平均心率、靜息心率、步數、活動分鐘、睡眠、7日基線
-  - Agent source 顯示 Mock fallback
-  - 顯示免責聲明：本結果僅為照護風險提示，不構成醫療診斷。
-- QA 截圖：
-  - `output/playwright/apple-health-institution-final.png`
-  - `output/playwright/apple-health-test001-final.png`
+- Steps prefer Apple Watch over iPhone on the same day to avoid double counting.
+- Sleep uses wake-date grouping, counts asleep categories only and merges overlaps.
+- Large XML should use the local streaming preview/derive commands and then import the derived CSV.
 
-## Demo Risk Flow
+```powershell
+cd backend
+npm run preview:apple-health -- ../private_data/apple_health/export.xml
+npm run derive:apple-health -- ../private_data/apple_health/export.xml
+```
 
-- 事件 1：`voice_symptom`，raw_text = `我有點頭暈`
-  - riskEngine 結果：attention，risk_score = 55
-- 事件 2：`sos_long_press`
-  - riskEngine 結果：high_risk，risk_score = 84
-  - task 已建立/升級：priority = high，status = pending
-- Agent analyze：
-  - agent_source = mock
-  - 已返回 caregiver_summary、family_summary、institution_summary
-  - 已包含免責聲明：本結果僅為照護風險提示，不構成醫療診斷。
+## Proven demo checks
 
-## 測試與建置
-
-- Backend tests：13 passed
-- Frontend Vitest：38 passed
-- TypeScript build：passed
-- Vite build：passed
-- Public Pages smoke check：passed
-
-## 結論
-
-Apple Watch / Apple Health 匯出資料已安全轉換為 CareBand v0.2 的 DailySnapshot 聚合資料，最近 14 天已匯入 `TEST001`，dashboard 與 demo risk flow 均可運作。此資料僅作為團隊成員 Apple Watch 測試資料，不代表真實長者資料，也不構成任何醫療診斷。
+- Reimporting the same CSV does not add another daily row.
+- A server quality value of 85 displays as 85%, not 1%, 8500% or a fabricated default.
+- Import history, source, synchronization time, missing-value warnings and trend refresh are visible in the local UI.
+- The software recording shows the real preview/confirm/history API path; it does not claim that TEST001 is an elder trial.

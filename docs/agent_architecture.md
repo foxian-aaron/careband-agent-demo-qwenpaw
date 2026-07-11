@@ -1,82 +1,53 @@
-# CareBand Agent Architecture
+# CareBand v0.2 Agent Architecture
 
-CareBand v0.2 separates deterministic risk classification from Agent summarization.
-
-## Chain
+## Rule-first chain
 
 ```text
-wearable data
--> DailySnapshot
--> personal baseline
--> deterministic riskEngine
--> /api/agent/analyze
--> role-based summaries
--> caregiver task
--> family / institution visibility
+Wearable / CSV / hardware event
+→ DailySnapshot or normalized event
+→ SQLite and seven-day baseline
+→ deterministic risk engine
+→ validated Agent JSON
+→ caregiver / family / institution views
+→ task lifecycle and linked-event resolution
 ```
 
-## deterministic riskEngine
+The six locked states are:
 
-The risk engine handles explainable classification before any LLM output.
+`data_insufficient | stable | observation | attention | high_risk | urgent`
 
-Examples:
+The rule engine owns state, score, evidence and action. SOS is always `urgent`; high-confidence fall is `urgent`; dizziness with the latest unconfirmed medication signal is `high_risk`; low-quality or low-wear data is `data_insufficient` unless a direct emergency exists.
 
-- low `data_quality` -> `insufficient_data`
-- `fall_detected` -> `urgent`
-- `sos_long_press` -> `high_risk`
-- symptom text such as `頭暈` / `胸悶` / `跌倒` / `不舒服` -> at least `attention`
-- activity and sleep drops vs personal baseline -> `observe` / `attention`
+## Server-owned Agent context
 
-This layer is intentionally deterministic so reviewers can inspect why a risk level changed.
+The manual regenerate endpoint accepts:
 
-## Agent Summarization
-
-The Agent does not invent a diagnosis. It converts structured inputs into role-specific communication:
-
-- caregiver summary
-- family summary
-- institution summary
-- recommended action
-- key reasons
-- safety disclaimer
-
-Every output must include:
-
-```text
-本結果僅為照護風險提示，不構成醫療診斷。
+```json
+{
+  "elder_id": "E001",
+  "source_event_id": "optional-event-id"
+}
 ```
 
-## Current Providers
+The backend reloads the elder, aggregated snapshot, baseline and active events, then runs rules. It does not accept client-supplied Agent snapshots, events or risk results.
 
-- `mockAgent`: default fallback; works without API keys.
-- `openaiAgent`: used only when `OPENAI_API_KEY` exists and `USE_MOCK_AGENT !== true`.
+Physical `esp32` and `nrf` events do not depend on a browser follow-up: after `POST /api/events` persists the event, risk and task, the backend queues the same server-owned Agent orchestration. Dashboard responses suppress a stored output when its risk lock no longer matches the current deterministic result.
 
-API keys live only in the backend `.env`; the frontend never receives them.
+## Providers and validation
 
-## QwenPaw-Style Integration Point
+- `qwenpaw`: local QwenPaw `/api/agent/process` + SSE + `X-Agent-Id`.
+- `openai`: explicit opt-in Provider only.
+- `mock`: deterministic Provider and labelled fallback.
 
-The v0.2 interface is prepared for a future QwenPaw-compatible provider:
+Every response must be JSON-only and match the project Agent Schema. It is rejected when it changes the rule result, lacks evidence or the fixed disclaimer, or contains diagnosis/prescription language. One repair attempt is allowed; the second failure becomes visible Mock fallback.
 
-```text
-POST /api/agent/analyze
-```
+## Privacy boundary
 
-Future QwenPaw integration can replace the backend implementation behind this endpoint without rewriting:
+- Only daily aggregates reach the Agent; raw Apple XML and raw heart-rate series never do.
+- Voice events store a bounded transcript summary, not raw audio/transcript payloads.
+- Location events accept only server-known coarse zone labels and safe-zone status; coordinates, precise addresses and address-like client zone text are removed before SQLite insertion and during legacy migration.
+- Agent logs retain a bounded response excerpt and redact credential-like errors.
 
-- frontend pages
-- DailySnapshot import
-- baseline calculation
-- deterministic riskEngine
-- task UI
+## Current proof boundary
 
-Do not claim QwenPaw is fully integrated in v0.2. The correct wording is:
-
-```text
-QwenPaw-style Agent interface prepared.
-Future integration point: /api/agent/analyze.
-```
-
-## Privacy Boundary
-
-The Agent may receive daily aggregated snapshots, risk results, and event summaries. It must not receive raw Apple Health XML, raw heart-rate time series, Apple ID, or full personal profile data.
-
+The QwenPaw provider, SSE parser, retry, Schema enforcement and fallback are implemented and covered by local fake-service tests. The current Alibaba credentials return 401, so current browser/video evidence is explicitly Mock fallback. Real success requires a new credential and a database run with `provider=qwenpaw`, `fallback_used=0`, and `validation_status=valid`.
