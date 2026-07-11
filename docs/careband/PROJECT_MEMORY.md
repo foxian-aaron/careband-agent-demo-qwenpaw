@@ -11,6 +11,7 @@ This file is the durable handoff for future CareBand chats. Read it before work 
 - Verified implementation baseline before this memory was added: `470cc535208612ef4c4c667f207d69e1d7f713a7`
 - Repository state before this memory-only change: clean
 - GitHub publication policy: verify the remote directly. A source-branch push requires explicit user authorization and does not imply a pull request or public deployment.
+- Verified remote state on 2026-07-11: `origin/codex/careband-real-demo` exists and tracks the local branch. No pull request or v0.2 public deployment was created.
 - `careband-agent-demo-v02` is UI reference only and must not be merged wholesale.
 
 ## Product Invariants
