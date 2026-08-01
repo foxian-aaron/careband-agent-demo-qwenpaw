@@ -20,10 +20,10 @@ const risk = (id: string, o: Record<string, unknown> = {}): Record<string, unkno
   data_quality: 0, safety_disclaimer: "本结果仅为照护风险提示，不构成医疗诊断。", ...o });
 const row = (id: string, elderO: Record<string, unknown> = {}, riskO: Record<string, unknown> = {}): Record<string, unknown> => ({
   elder: elder(id, elderO), latest_snapshot: null, events: [], active_events: [], risk_result: risk(id, riskO), tasks: [], latest_agent_output: null, latest_agent_run: null });
-/** One-row dashboard for E001; riskPatch=null omits risk_result, else merges over the base. */
+/** Complete dashboard with a patched E001 risk; null omits E001 risk_result. */
 const singleRowDashboard = (riskPatch: Record<string, unknown> | null): unknown => ({
   ok: true, generated_at: "2026-08-01T12:00:00.000Z", operational_summary: {},
-  rows: [{ elder: elder("E001"), latest_snapshot: null, events: [], active_events: [], risk_result: riskPatch === null ? null : { ...risk("E001"), ...riskPatch }, tasks: [], latest_agent_output: null, latest_agent_run: null }] });
+  rows: [{ elder: elder("E001"), latest_snapshot: null, events: [], active_events: [], risk_result: riskPatch === null ? null : { ...risk("E001"), ...riskPatch }, tasks: [], latest_agent_output: null, latest_agent_run: null }, row("E002"), row("E003"), row("E004")] });
 const validDashboard = (): unknown => ({
   ok: true, generated_at: "2026-08-01T12:00:00.000Z",
   rows: [
@@ -32,6 +32,8 @@ const validDashboard = (): unknown => ({
       latest_snapshot: { data_quality: 90, wear_time_hours: 12, steps: 5000, sleep_duration: 7 },
       events: [
         { event_id: 1, elder_id: "FORGED-EID", event_type: "sos", source: "software_simulator", occurred_at: "2026-08-01T11:00:00.000Z", status: "active", payload: { note: "should-not-leak-raw-text" } },
+        { event_id: 3, event_type: "medication", payload: { action: "missed" } },
+        { event_id: 4, event_type: "location" }, { event_id: 5, event_type: "device_status" }, { event_id: 6, event_type: "manual_note" },
         { event_id: 2, event_type: "totally_unknown_type", source: "system" }, // dropped
       ],
       active_events: [],
@@ -69,6 +71,7 @@ describe("apiClient", () => {
     expect(resolveBaseUrl({ env: {}, hostname: "127.0.0.1" })).toBe("");
     expect(resolveBaseUrl({ env: {}, hostname: "0.0.0.0" })).toBe("");
     expect(resolveBaseUrl({ env: {}, hostname: "careband.example.com" })).toBeNull();
+    expect(resolveBaseUrl({ env: { VITE_API_BASE_URL: "https://api.example" }, hostname: "foxian-aaron.github.io" })).toBeNull();
   });
   it("local default requests exactly /api/dashboard (Vite proxy); static preview never fetches", async () => {
     let url = "";
@@ -135,7 +138,9 @@ describe("mapDashboard valid payload", () => {
     expect(ev.eventType).toBe("sos"); expect(ev.title).toBe("SOS 求助事件");
     expect(ev.source).toBe("software_simulator"); expect(ev.rawText).toBeUndefined();
     expect(JSON.stringify(ev)).not.toContain("should-not-leak-raw-text");
-    expect(payload.events).toHaveLength(1); // unknown_type event dropped
+    expect(payload.events).toHaveLength(5); // known canonical events kept; unknown dropped
+    expect(payload.events.find((e) => e.eventId === "EVT-SRV-3")?.title).toBe("用药未确认");
+    expect(payload.events.map((e) => e.eventType)).toEqual(expect.arrayContaining(["location_alert", "device_status", "manual_note"]));
   });
   it("tasks: server risk fields only, and use the row elderId (forged nested id ignored)", () => {
     const task = payload.tasks[0] as CareTask;
@@ -157,6 +162,13 @@ describe("mapDashboard rejects invalid payloads", () => {
   });
   it("rejects a mapped elder lacking an authoritative risk_result", () => {
     expect(() => mapDashboard(singleRowDashboard(null), mockProfilesRecord)).toThrow(InvalidBackendPayloadError);
+  });
+  it("rejects missing or duplicate formal elder rows", () => {
+    const missing = singleRowDashboard({}) as { rows: unknown[] };
+    missing.rows.pop();
+    expect(() => mapDashboard(missing, mockProfilesRecord)).toThrow(InvalidBackendPayloadError);
+    const duplicate = validDashboard() as { rows: unknown[] }; duplicate.rows.push(row("E001"));
+    expect(() => mapDashboard(duplicate, mockProfilesRecord)).toThrow(InvalidBackendPayloadError);
   });
   // data_quality: only null or a finite number; undefined/missing/string/bool/NaN reject.
   it.each([
@@ -209,12 +221,8 @@ describe("demoStore", () => {
     expect(getRiskForElder(base(), "E001").recommendedAction).not.toBe("server-action");
   });
   it("connected never falls back to frontend risk when server risk is missing", () => {
-    const r = getRiskForElder(connected(samplePayload({ riskMap: {} })), "E001");
-    expect(r.riskLevel).toBe("data_insufficient"); expect(r.riskScore).toBe(0);
-    expect(r.recommendedAction).toBe("服务端风险结果缺失，请刷新后端连接");
-    expect(r.keyReasons).toContain("服务端风险结果缺失，请刷新后端连接");
-    expect(r.medicalDisclaimer).toBe("本结果仅为照护风险提示，不构成医疗诊断。");
-    expect(getRiskForElder(base(), "E001").recommendedAction).not.toContain("服务端风险结果缺失");
+    expect(() => getRiskForElder(connected(samplePayload({ riskMap: {} })), "E001"))
+      .toThrow("authoritative server risk unavailable");
   });
   it("connected blocks local writes (readOnlyNotice); mock still applies", () => {
     const before = JSON.parse(JSON.stringify(connected().tasks));
@@ -241,5 +249,8 @@ describe("demoStore", () => {
     const m = serializeForStorage(base());
     expect("serverData" in m).toBe(false);
     expect(JSON.stringify(m)).not.toContain("serverData");
+    const voice = serializeForStorage(demoReducer(base(), { type: "TRIGGER_CHEN_DIZZINESS" }));
+    expect(voice.events.every((event) => event.rawText === undefined)).toBe(true);
+    expect(JSON.stringify(voice)).not.toContain("rawText");
   });
 });

@@ -603,12 +603,9 @@ const loadInitialState = () => {
 export const serializeForStorage = (
   state: DemoState,
 ): Omit<DemoState, "serverData"> => {
-  if (state.backend.mode === "backend") {
-    const { serverData, ...rest } = createInitialDemoState();
-    return rest;
-  }
-  const { serverData, ...persistable } = state;
-  return persistable;
+  const source = state.backend.mode === "backend" ? createInitialDemoState() : state;
+  const { serverData, ...persistable } = source;
+  return { ...persistable, events: persistable.events.map(({ rawText, ...event }) => event) };
 };
 
 export const DemoProvider = ({ children }: { children: ReactNode }) => {
@@ -683,36 +680,16 @@ export const getActiveTaskForElder = (state: DemoState, elderId: string) =>
 export const getTaskHistoryForElder = (state: DemoState, elderId: string) =>
   selectTaskHistoryForElder(elderId, state.tasks);
 
-const serverRiskMissingResult = (elderId: string): RiskResult => ({
-  elderId,
-  riskLevel: "data_insufficient",
-  riskScore: 0,
-  dimensions: {
-    vitals: "data_insufficient",
-    activity: "data_insufficient",
-    sleep: "data_insufficient",
-    medication: "data_insufficient",
-    safety: "data_insufficient",
-  },
-  keyReasons: ["服务端风险结果缺失，请刷新后端连接"],
-  triggeredRules: ["data_insufficient"],
-  recommendedAction: "服务端风险结果缺失，请刷新后端连接",
-  dataCompleteness: 0,
-  confidence: 0,
-  medicalDisclaimer: "本结果仅为照护风险提示，不构成医疗诊断。",
-});
-
 export const getRiskForElder = (
   state: DemoState,
   elderId: string,
 ): RiskResult => {
   // Connected mode: the server risk_result is the single authority. When it is
-  // missing for an elder, return an honest data-insufficient result instead of
-  // ever falling back to the frontend risk engine.
+  // missing for an elder, fail closed instead of synthesizing a frontend risk.
   if (state.backend.mode === "backend") {
     const serverRisk = state.serverData?.riskMap[elderId];
     if (serverRisk) return serverRisk;
-    return serverRiskMissingResult(elderId);
+    throw new Error("authoritative server risk unavailable");
   }
   return calculateRisk({
     profile: state.profiles[elderId],

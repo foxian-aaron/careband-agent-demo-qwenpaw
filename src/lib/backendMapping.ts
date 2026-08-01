@@ -106,10 +106,18 @@ const EVENTS: Record<string, [CareEvent["eventType"], string]> = {
   voice_symptom: ["voice_symptom", "语音症状反馈"], voice: ["voice_symptom", "语音症状反馈"],
   medication_reminder: ["medication_reminder", "用药提醒"],
   medication_confirmed: ["medication_confirmed", "用药已确认"], medication_missed: ["medication_confirmed", "用药已确认"],
-  medication: ["medication_confirmed", "用药已确认"], location_alert: ["location_alert", "位置区域提醒"],
+  location: ["location_alert", "位置区域提醒"], location_alert: ["location_alert", "位置区域提醒"],
+  device_status: ["device_status", "设备状态更新"], manual_note: ["manual_note", "人工照护记录"],
   night_wakeup: ["night_wakeup", "夜间离床记录"], low_activity: ["low_activity", "活动量下降记录"],
   caregiver_accepted: ["caregiver_accepted", "护工已接单"], caregiver_checked: ["caregiver_checked", "护工已查看"],
   caregiver_completed: ["caregiver_completed", "护工已完成跟进"], system_risk_update: ["system_risk_update", "系统风险更新"],
+};
+const eventEntry = (raw: Obj): [CareEvent["eventType"], string] | undefined => {
+  const type = str(raw.event_type);
+  if (type !== "medication") return type ? EVENTS[type] : undefined;
+  const action = isObj(raw.payload) ? str(raw.payload.action) : undefined;
+  if (action === "confirmed") return ["medication_confirmed", "用药已确认"];
+  return ["medication_reminder", action === "missed" ? "用药未确认" : "用药提醒"];
 };
 // software_simulator preserved verbatim; unknown sources default to system.
 const SOURCES: Record<string, CareEvent["source"]> = {
@@ -133,7 +141,7 @@ const eventStatus = (v: unknown): CareEvent["status"] => {
 // fallbackElderId is the owning row's elderId; a nested forged elder_id is ignored.
 const mapEvent = (raw: unknown, fallbackElderId: string, index: number): CareEvent | null => {
   if (!isObj(raw)) return null;
-  const entry = typeof raw.event_type === "string" ? EVENTS[raw.event_type] : undefined;
+  const entry = eventEntry(raw);
   if (!entry) return null; // unknown event_type -> dropped, not faked
   return {
     eventId: String(raw.event_id !== undefined ? `EVT-SRV-${raw.event_id}` : `EVT-SRV-${fallbackElderId}-${index}`),
@@ -271,6 +279,7 @@ export function mapDashboard(data: unknown, mockProfiles: Record<string, ElderPr
     if (!profile) continue;
     const elderId = profile.elderId;
     if (!ALLOWED_ELDERS.has(elderId)) continue; // only formal demo elders
+    if (profiles[elderId]) throw new InvalidBackendPayloadError("invalid_payload", `${elderId} 重复`);
 
     // Authoritative risk is mandatory and strictly validated: any mapped elder
     // whose risk_result is missing or has an invalid field rejects the response.
@@ -287,6 +296,10 @@ export function mapDashboard(data: unknown, mockProfiles: Record<string, ElderPr
     const elderTasks = arr(rowRaw.tasks).map((t, i) => mapTask(t, elderId, i)).filter((t): t is CareTask => t !== null);
     tasks.push(...elderTasks);
     operationalStates[elderId] = deriveState(elderTasks);
+  }
+
+  if ([...ALLOWED_ELDERS].some((id) => !profiles[id])) {
+    throw new InvalidBackendPayloadError("invalid_payload", "正式长者数据不完整");
   }
 
   return {

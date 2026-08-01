@@ -1,5 +1,5 @@
 // src/lib/apiClient.ts — Stage 6B read-only dashboard fetch with static-preview
-// fallback. Explicit VITE_API_BASE_URL wins (trailing slash stripped so the
+// fallback. Except on GitHub Pages, explicit VITE_API_BASE_URL wins (trailing slash stripped so the
 // request is /api/dashboard, never //api/dashboard). On localhost/127.0.0.1/0.0.0.0
 // the base is same-origin "" and the Vite dev/preview /api proxy forwards to
 // http://127.0.0.1:3001. Any non-local host without an explicit base URL is a
@@ -40,11 +40,14 @@ export interface ResolveBaseUrlInput {
 }
 /** Resolve the dashboard API base URL; null means static preview (no request). */
 export function resolveBaseUrl(input: ResolveBaseUrlInput = {}): string | null {
+  const hostname = (input.hostname ?? currentHostname()).toLowerCase();
+  // GitHub Pages is always the static Mock preview, even if a build-time API
+  // URL was accidentally configured.
+  if (hostname.endsWith(".github.io")) return null;
   const explicit = (input.env ?? safeEnv())?.VITE_API_BASE_URL;
   if (typeof explicit === "string" && explicit.trim() !== "") {
     return explicit.trim().replace(/\/+$/, "");
   }
-  const hostname = input.hostname ?? currentHostname();
   // Local dev/preview: same-origin base (""). The browser GETs /api/dashboard on
   // its own origin (no CORS) and the Vite /api proxy forwards to 127.0.0.1:3001.
   return typeof hostname === "string" && LOCALHOST_HOSTS.has(hostname) ? "" : null;

@@ -154,6 +154,8 @@ export interface CareEvent {
     | "caregiver_accepted"
     | "caregiver_checked"
     | "caregiver_completed"
+    | "device_status"
+    | "manual_note"
     | "system_risk_update";
   timestamp: string;
   title: string;
