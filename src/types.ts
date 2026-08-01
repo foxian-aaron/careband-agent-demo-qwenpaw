@@ -158,7 +158,7 @@ export interface CareEvent {
   timestamp: string;
   title: string;
   rawText?: string;
-  source: "demo" | "mock_wearable" | "caregiver" | "system";
+  source: "demo" | "mock_wearable" | "caregiver" | "system" | "software_simulator";
   severity?: RiskLevel;
   payload?: {
     symptomKeywords?: string[];
@@ -234,4 +234,54 @@ export interface TrendPoint {
 export interface ElderTrend {
   elderId: string;
   points: TrendPoint[];
+}
+
+// ---------------------------------------------------------------------------
+// Stage 6B — backend read-only sync types
+// ---------------------------------------------------------------------------
+
+/** Live connection status for the read-only dashboard sync. */
+export type BackendStatus = "connecting" | "connected" | "mock";
+
+/** Source of truth for the current view: live backend or local Mock. */
+export type BackendMode = "backend" | "mock";
+
+/** Short, safe error descriptor. Never carries body/path/stack/credentials. */
+export interface BackendSyncError {
+  code: string;
+  message: string;
+  status?: number;
+}
+
+/** Connection slice stored alongside the Mock business data. */
+export interface BackendConnectionState {
+  status: BackendStatus;
+  mode: BackendMode;
+  lastSyncedAt: string | null;
+  error: BackendSyncError | null;
+  readOnlyNotice: string | null;
+}
+
+export interface BackendOperationalSummary {
+  elderCount: number;
+  urgentCount: number;
+  highRiskCount: number;
+  activeTaskCount: number;
+  statusDistribution: Record<string, number>;
+}
+
+/**
+ * A pure, reducer-ready snapshot of a Stage 6A dashboard response. Only
+ * `subject_kind === "elder"` subjects are mapped; server risk is authoritative.
+ * Business data here is in-memory only (never persisted to localStorage).
+ */
+export interface BackendSyncPayload {
+  generatedAt: string;
+  profiles: Record<string, ElderProfile>;
+  snapshots: Record<string, DailySnapshot>;
+  events: CareEvent[];
+  tasks: CareTask[];
+  operationalStates: Record<string, OperationalState>;
+  riskMap: Record<string, RiskResult>;
+  operationalSummary: BackendOperationalSummary;
 }
