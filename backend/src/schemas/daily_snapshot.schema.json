@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://careband.local/schemas/daily_snapshot.schema.json",
+  "title": "CareBandDailySnapshot",
+  "description": "Server-validated daily aggregate snapshot imported from CSV (Issue #23). The four client risk fields (status_level / risk_score / key_reasons / recommended_action) and the server-owned row identity (snapshot_id) are intentionally absent: the backend recomputes risk deterministically and owns every row id. elder_id and data_source are always overwritten by the server.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "elder_id",
+    "date",
+    "data_source",
+    "heart_rate_avg",
+    "resting_heart_rate",
+    "steps",
+    "active_minutes",
+    "sleep_duration",
+    "wear_time_hours",
+    "data_quality"
+  ],
+  "properties": {
+    "elder_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$" },
+    "date": { "type": "string", "format": "careband-date" },
+    "data_source": { "const": "CSV Import" },
+    "heart_rate_avg": { "type": ["number", "null"], "minimum": 20, "maximum": 250 },
+    "resting_heart_rate": { "type": ["number", "null"], "minimum": 20, "maximum": 200 },
+    "steps": { "type": ["integer", "null"], "minimum": 0, "maximum": 200000 },
+    "active_minutes": { "type": ["number", "null"], "minimum": 0, "maximum": 1440 },
+    "sleep_duration": { "type": ["number", "null"], "minimum": 0, "maximum": 24 },
+    "wear_time_hours": { "type": ["number", "null"], "minimum": 0, "maximum": 24 },
+    "data_quality": { "type": ["number", "null"], "minimum": 0, "maximum": 100 }
+  }
+}

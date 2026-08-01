@@ -15,6 +15,7 @@ import eventsRouter from "./routes/events.js";
 import tasksRouter from "./routes/tasks.js";
 import eldersRouter from "./routes/elders.js";
 import dashboardRouter from "./routes/dashboard.js";
+import importRouter from "./routes/import.js";
 
 function healthHandler(_req, res) {
   res.status(200).json({
@@ -51,6 +52,15 @@ export function createApp() {
   const application = express();
   application.disable("x-powered-by");
 
+  // CSV daily-snapshot imports (Stage 9A / Issue #23) may carry up to 64 KiB of
+  // csv_text in the JSON body, so the /api/import mount point gets its own
+  // larger body limit. body-parser skips parsing once a body has already been
+  // read, so this parser wins for /api/import while the 64kb global limit below
+  // still governs every other route (events, tasks, elders, dashboard).
+  // JSON escaping can expand a valid 64 KiB CSV by almost 6x, so the transport
+  // envelope is deliberately larger; csvImporter still enforces the real
+  // 64 KiB application limit before parsing or persistence.
+  application.use("/api/import", express.json({ limit: "400kb" }));
   // 64kb body limit: canonical events are small and structured; raw voice /
   // audio / large blobs are permanently out of scope (see AGENTS.md §6).
   application.use(express.json({ limit: "64kb" }));
@@ -64,6 +74,7 @@ export function createApp() {
   // fallthrough so their paths are matched first.
   application.use("/api/elders", eldersRouter);
   application.use("/api/dashboard", dashboardRouter);
+  application.use("/api/import", importRouter);
   // Fallthrough for any other /api/* method/path -> JSON 404.
   application.use("/api", notFoundHandler);
   // Last resort for unexpected errors -> safe JSON 500.
