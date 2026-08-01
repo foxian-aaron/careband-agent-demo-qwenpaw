@@ -20,6 +20,8 @@ import { mockProfiles } from "../data/mockProfiles";
 import { mockSnapshots } from "../data/mockSnapshots";
 import { mockTrends } from "../data/mockTrends";
 import { generateAgentSummaries } from "../lib/agentFormatter";
+import { fetchDashboard } from "../lib/apiClient";
+import { mapDashboard } from "../lib/backendMapping";
 import { deriveCareLoopStatus, deriveDisplayStatus } from "../lib/displayStatus";
 import { calculateRisk } from "../lib/riskEngine";
 import {
@@ -29,6 +31,9 @@ import {
 } from "../lib/taskSelectors";
 import type {
   AgentRoleSummaries,
+  BackendConnectionState,
+  BackendSyncError,
+  BackendSyncPayload,
   CareEvent,
   CareTask,
   ContactPerson,
@@ -45,6 +50,16 @@ import type {
 const storageKey = "careband-agent-demo-state-v0.1.3";
 const chenId = "E001";
 
+const READ_ONLY_NOTICE = "连接写操作将在下一切片实现";
+
+const mockBackend = (): BackendConnectionState => ({
+  status: "mock",
+  mode: "mock",
+  lastSyncedAt: null,
+  error: null,
+  readOnlyNotice: null,
+});
+
 export interface DemoState {
   profiles: Record<string, ElderProfile>;
   baselines: Record<string, PersonalBaseline>;
@@ -56,6 +71,8 @@ export interface DemoState {
   events: CareEvent[];
   tasks: CareTask[];
   operationalStates: Record<string, OperationalState>;
+  backend: BackendConnectionState;
+  serverData: BackendSyncPayload | null;
 }
 
 export type DemoAction =
@@ -66,7 +83,10 @@ export type DemoAction =
   | { type: "CONFIRM_EVENING_MEDICATION" }
   | { type: "COMPLETE_CARE_TASK" }
   | { type: "TRIGGER_SOS" }
-  | { type: "SIMULATE_DATA_GAP" };
+  | { type: "SIMULATE_DATA_GAP" }
+  | { type: "BACKEND_CONNECTING" }
+  | { type: "BACKEND_CONNECTED"; payload: BackendSyncPayload }
+  | { type: "BACKEND_FAILED"; error: BackendSyncError };
 
 interface DemoContextValue {
   state: DemoState;
@@ -87,6 +107,9 @@ const toContactRecord = (items: ContactPerson[]) =>
     return record;
   }, {});
 
+/** Static mock profiles used to supplement server profile display fields. */
+const mockProfilesRecord = toRecord(mockProfiles);
+
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 export const createInitialDemoState = (): DemoState => ({
@@ -100,6 +123,8 @@ export const createInitialDemoState = (): DemoState => ({
   events: clone(mockEvents),
   tasks: clone(mockTasks),
   operationalStates: clone(mockOperationalStates),
+  backend: mockBackend(),
+  serverData: null,
 });
 
 const addEventOnce = (events: CareEvent[], event: CareEvent) =>
@@ -168,8 +193,67 @@ const updateActiveTask = (
   return tasks.map((task) => (task.taskId === activeTask.taskId ? updater(task) : task));
 };
 
+/** Hydrate business data from an authoritative server payload (in-memory only). */
+const hydrateFromBackend = (
+  state: DemoState,
+  payload: BackendSyncPayload,
+): DemoState => ({
+  ...state,
+  profiles: payload.profiles,
+  snapshots: payload.snapshots,
+  events: payload.events,
+  tasks: payload.tasks,
+  operationalStates: payload.operationalStates,
+  serverData: payload,
+  backend: {
+    status: "connected",
+    mode: "backend",
+    lastSyncedAt: payload.generatedAt,
+    error: null,
+    readOnlyNotice: null,
+  },
+});
+
 export const demoReducer = (state: DemoState, action: DemoAction): DemoState => {
+  // Read-only connected mode: local demo actions cannot mutate business data;
+  // only a visible, safe notice is written.
+  if (
+    action.type !== "BACKEND_CONNECTING" &&
+    action.type !== "BACKEND_CONNECTED" &&
+    action.type !== "BACKEND_FAILED" &&
+    state.backend.mode === "backend"
+  ) {
+    return {
+      ...state,
+      backend: { ...state.backend, readOnlyNotice: READ_ONLY_NOTICE },
+    };
+  }
+
   switch (action.type) {
+    case "BACKEND_CONNECTING":
+      return {
+        ...state,
+        backend: { ...state.backend, status: "connecting", readOnlyNotice: null },
+      };
+    case "BACKEND_CONNECTED":
+      return hydrateFromBackend(state, action.payload);
+    case "BACKEND_FAILED": {
+      const failedBackend: BackendConnectionState = {
+        status: "mock",
+        mode: "mock",
+        lastSyncedAt: null,
+        error: action.error,
+        readOnlyNotice: null,
+      };
+      // Returning from a connected backend view: reset to a clean Mock baseline
+      // so no transient server values are mistaken for Mock data.
+      if (state.backend.mode === "backend") {
+        return { ...createInitialDemoState(), serverData: null, backend: failedBackend };
+      }
+      // Coming from Mock/connecting: preserve the existing Mock business state,
+      // only updating the backend error state and dropping any serverData.
+      return { ...state, serverData: null, backend: failedBackend };
+    }
     case "RESET_DEMO":
       return createInitialDemoState();
     case "TRIGGER_CHEN_DIZZINESS": {
@@ -500,18 +584,75 @@ const loadInitialState = () => {
       events: parsed.events ?? initial.events,
       tasks: parsed.tasks ?? initial.tasks,
       operationalStates: parsed.operationalStates ?? initial.operationalStates,
+      // Always boot in Mock; connected data is never restored from storage —
+      // the Provider re-syncs on mount. Server data stays in-memory only.
+      backend: initial.backend,
+      serverData: null,
     };
   } catch {
     return createInitialDemoState();
   }
 };
 
+/**
+ * Pure persistence helper. Connected (server-derived) business data is never
+ * written to localStorage: in backend mode the clean Mock baseline is returned
+ * instead, so no server values ever reach storage. The returned object never
+ * carries a serverData property at all (not even null).
+ */
+export const serializeForStorage = (
+  state: DemoState,
+): Omit<DemoState, "serverData"> => {
+  const source = state.backend.mode === "backend" ? createInitialDemoState() : state;
+  const { serverData, ...persistable } = source;
+  return { ...persistable, events: persistable.events.map(({ rawText, ...event }) => event) };
+};
+
 export const DemoProvider = ({ children }: { children: ReactNode }) => {
   const [state, dispatch] = useReducer(demoReducer, undefined, loadInitialState);
 
+  // Mock mode persists local changes; connected data stays in-memory only.
   useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(state));
+    if (state.backend.mode === "backend") return;
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify(serializeForStorage(state)),
+    );
   }, [state]);
+
+  // On mount, attempt a single read-only dashboard sync. Success hydrates the
+  // server view; any failure or static preview keeps the Mock data and surfaces
+  // a safe error. No write operations are performed.
+  useEffect(() => {
+    let cancelled = false;
+    const sync = async () => {
+      dispatch({ type: "BACKEND_CONNECTING" });
+      const result = await fetchDashboard();
+      if (cancelled) return;
+      if (result.status === "connected") {
+        try {
+          const payload = mapDashboard(result.data, mockProfilesRecord);
+          if (!cancelled) dispatch({ type: "BACKEND_CONNECTED", payload });
+        } catch {
+          if (!cancelled) {
+            dispatch({
+              type: "BACKEND_FAILED",
+              error: {
+                code: "invalid_payload",
+                message: "响应映射失败，使用本地 Mock 数据",
+              },
+            });
+          }
+        }
+      } else if (!cancelled) {
+        dispatch({ type: "BACKEND_FAILED", error: result.error });
+      }
+    };
+    void sync();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const value = useMemo(() => ({ state, dispatch }), [state]);
 
@@ -542,13 +683,21 @@ export const getTaskHistoryForElder = (state: DemoState, elderId: string) =>
 export const getRiskForElder = (
   state: DemoState,
   elderId: string,
-): RiskResult =>
-  calculateRisk({
+): RiskResult => {
+  // Connected mode: the server risk_result is the single authority. When it is
+  // missing for an elder, fail closed instead of synthesizing a frontend risk.
+  if (state.backend.mode === "backend") {
+    const serverRisk = state.serverData?.riskMap[elderId];
+    if (serverRisk) return serverRisk;
+    throw new Error("authoritative server risk unavailable");
+  }
+  return calculateRisk({
     profile: state.profiles[elderId],
     baseline: state.baselines[elderId],
     snapshot: state.snapshots[elderId],
     events: getEventsForElder(state, elderId),
   });
+};
 
 export const getAgentSummariesForElder = (
   state: DemoState,
