@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "run_id": "RUN-20260801-PHASE6-STAGE01-009-REPAIR3",
+  "phase": "Phase 6 / Stage 1 governance",
+  "generated_at": "2026-07-31T21:06:37.249Z",
+  "generated_by": "Deterministic Worker",
+  "public_evidence_is_redacted": true,
+  "qwenpaw": {
+    "version": "2.0.1",
+    "agent_id": "CnW5Bk",
+    "model": "glm-5.2",
+    "provider": "zhipu-cn-codingplan",
+    "chat_id": "56084bb2-3037-45c6-910f-4271c52282ce",
+    "chat_name": "[RUN-20260801-PHASE6-STAGE01-009-REPAIR3][PHASE6] Stage 1 Governance Final Repair",
+    "client_visible": true,
+    "raw_result_json_valid": false,
+    "embedded_result_json_valid": true
+  },
+  "git": {
+    "branch": "qwenpaw/stage-01-governance",
+    "base_sha": "6123d79d797ed9296686d515d6aea36f157b8d71",
+    "worktree_head_at_capture": "6123d79d797ed9296686d515d6aea36f157b8d71",
+    "governed_file_count": 9,
+    "governed_files": [
+      ".github/pull_request_template.md",
+      "AGENTS.md",
+      "docs/rebuild/00_SCOPE.md",
+      "docs/rebuild/01_FEATURE_MATRIX.md",
+      "docs/rebuild/02_ARCHITECTURE_DECISIONS.md",
+      "docs/rebuild/BUILD_LOG.md",
+      "docs/rebuild/CODEX_REVIEW_RULES.md",
+      "docs/rebuild/CURRENT_STATE.md",
+      "docs/rebuild/PROMPTS/stage-01.md"
+    ],
+    "note": "Final commit SHA is recorded in the PR because a manifest cannot embed the SHA of the commit that contains itself."
+  },
+  "hashes": {
+    "prompt_sha256": "9a1527a2c0dd02c12cf7b5f1432e100bd6287d0bcf00820f2dd6141ba4ca7a81",
+    "result_sha256": "4660bdc1ff82ce9b992096807f5794167dcaf34c80f7be5bb888a42c5255f6f0",
+    "contract_sha256": "5cc8e78e12a207958c47a64342cea3b63bf7ee750ebfbafafa0ee6c0b890cc23",
+    "governed_payload_sha256": "8df7621cc70991dc1c7af3b80ba1308001b79245c35d5671b03f87c8924b136e",
+    "screenshot_sha256": "7e075aca4e68e83ce9c7b4512b759e777a7e85f965759a04c7f62083e093ff56"
+  },
+  "verification": {
+    "node": "v22.23.1",
+    "npm": "10.9.8",
+    "npm_ci": "pass",
+    "test_files_passed": 6,
+    "tests_passed": 31,
+    "build": "pass",
+    "package_lock_unchanged": true,
+    "matrix_rows": 25,
+    "matrix_enums": "pass",
+    "scope_scan": "pass",
+    "secret_scan": "clean",
+    "reference_repo_guard": "clean; push disabled"
+  },
+  "codex_review": {
+    "verdict": "PASS_WITH_RECORDED_INTERVENTION",
+    "open_findings": {
+      "S": 0,
+      "A": 0,
+      "B": 2,
+      "C": 0
+    },
+    "qwenpaw_repair_rounds": 3,
+    "non_blocking_risks": [
+      "Existing dependency audit reports 3 moderate, 2 high, and 1 critical vulnerability; no automatic audit fix was run.",
+      "QwenPaw raw JSON-only responses remain unstable; persisted chat and actual Git state are authoritative."
+    ],
+    "recorded_interventions": [
+      "Deterministic Worker removed the exact unauthorized REPAIR1_TODO.md after inspection.",
+      "The controller deterministically extracted the embedded JSON from the final QwenPaw response without changing product content."
+    ]
+  },
+  "privacy": {
+    "full_chat_committed": false,
+    "tokens_or_credentials_committed": false,
+    "local_username_or_absolute_path_committed": false,
+    "real_health_data_committed": false
+  }
+}
