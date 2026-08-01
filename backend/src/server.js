@@ -6,6 +6,11 @@
 
 import { app } from "./app.js";
 import { host, port } from "./config.js";
+import { getDb } from "./db.js";
+
+// Initialize the SQLite database (schema + migration + idempotent seed) before
+// the server starts listening. No API is added by this call.
+getDb();
 
 const server = app.listen(port, host, () => {
   console.log(`careband-backend listening on http://${host}:${port}`);
