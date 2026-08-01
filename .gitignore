@@ -8,3 +8,10 @@ tsconfig.tsbuildinfo
 .vite-preview-*.log
 .DS_Store
 npm-debug.log*
+
+# SQLite databases (Stage 3) — never commit database files
+backend/data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
