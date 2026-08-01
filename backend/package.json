@@ -10,7 +10,9 @@
   "scripts": {
     "dev": "node src/server.js",
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "preview:apple-health": "node scripts/previewAppleHealth.js",
+    "derive:apple-health": "node scripts/deriveAppleHealthCsv.js"
   },
   "dependencies": {
     "ajv": "8.18.0",
