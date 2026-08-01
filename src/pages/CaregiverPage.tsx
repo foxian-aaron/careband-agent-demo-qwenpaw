@@ -60,6 +60,7 @@ export const CaregiverPage = () => {
                 return (
                   <CareTaskCard
                     careLoopStatus={deriveCareLoopStatus(task.elderId, state.tasks, events)}
+                    connected={state.backend.mode === "backend"}
                     dispatch={dispatch}
                     events={events}
                     key={task.taskId}
@@ -149,6 +150,7 @@ export const CaregiverPage = () => {
               return (
                 <CareTaskCard
                   careLoopStatus={deriveCareLoopStatus(task.elderId, state.tasks, events)}
+                  connected={state.backend.mode === "backend"}
                   dispatch={dispatch}
                   events={events}
                   key={task.taskId}

@@ -129,3 +129,110 @@ export async function fetchDashboard(
   }
   return { status: "connected", data: body };
 }
+
+// ---------------------------------------------------------------------------
+// Stage 6C — safe JSON writes: POST /api/events, PATCH /api/tasks/:id
+// ---------------------------------------------------------------------------
+
+export type WriteResult =
+  | { status: "ok" }
+  | { status: "error"; error: BackendSyncError };
+
+export interface WriteOptions {
+  baseUrl?: string | null;
+  fetchImpl?: FetchLike;
+  timeoutMs?: number;
+}
+
+/**
+ * Shared safe JSON write helper. Requires HTTP success, application/json
+ * content-type and body.ok === true. Response bodies, paths, stacks and
+ * credentials are never echoed back — only a short safe error code/message.
+ */
+const safeJsonWrite = async (
+  method: string,
+  url: string,
+  body: Record<string, unknown>,
+  options: WriteOptions,
+): Promise<WriteResult> => {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const controller =
+    typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer =
+    controller && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method,
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: controller ? controller.signal : undefined,
+    });
+  } catch (err) {
+    if (controller && err instanceof Error && err.name === "AbortError") {
+      return { status: "error", error: safeError("timeout", "写入请求超时") };
+    }
+    return { status: "error", error: safeError("network", "网络错误，写入失败") };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    return {
+      status: "error",
+      error: safeError("http_error", "服务器返回错误状态，写入失败", response.status),
+    };
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    return { status: "error", error: safeError("bad_content_type", "响应非 JSON，写入失败") };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = await response.json();
+  } catch {
+    return { status: "error", error: safeError("bad_json", "响应解析失败，写入失败") };
+  }
+
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    (parsed as { ok?: unknown }).ok !== true
+  ) {
+    return { status: "error", error: safeError("invalid_payload", "响应结构无效，写入失败") };
+  }
+  return { status: "ok" };
+};
+
+/** POST /api/events with a safe JSON body. Static preview (null base) never fetches. */
+export async function postEvent(
+  body: Record<string, unknown>,
+  options: WriteOptions = {},
+): Promise<WriteResult> {
+  const baseUrl = options.baseUrl !== undefined ? options.baseUrl : resolveBaseUrl();
+  if (baseUrl === null) {
+    return { status: "error", error: safeError("static_preview", "静态预览，无法写入") };
+  }
+  return safeJsonWrite("POST", `${baseUrl}/api/events`, body, options);
+}
+
+/** PATCH /api/tasks/:id with a safe JSON body. Static preview never fetches. */
+export async function patchTask(
+  taskId: string,
+  body: Record<string, unknown>,
+  options: WriteOptions = {},
+): Promise<WriteResult> {
+  const baseUrl = options.baseUrl !== undefined ? options.baseUrl : resolveBaseUrl();
+  if (baseUrl === null) {
+    return { status: "error", error: safeError("static_preview", "静态预览，无法写入") };
+  }
+  return safeJsonWrite(
+    "PATCH",
+    `${baseUrl}/api/tasks/${encodeURIComponent(taskId)}`,
+    body,
+    options,
+  );
+}

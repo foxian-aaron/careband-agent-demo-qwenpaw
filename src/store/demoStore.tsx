@@ -1,10 +1,12 @@
 import {
+  useCallback,
   createContext,
   type Dispatch,
   useContext,
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   type ReactNode,
 } from "react";
 import { mockBaselines } from "../data/mockBaselines";
@@ -20,7 +22,7 @@ import { mockProfiles } from "../data/mockProfiles";
 import { mockSnapshots } from "../data/mockSnapshots";
 import { mockTrends } from "../data/mockTrends";
 import { generateAgentSummaries } from "../lib/agentFormatter";
-import { fetchDashboard } from "../lib/apiClient";
+import { fetchDashboard, patchTask, postEvent } from "../lib/apiClient";
 import { mapDashboard } from "../lib/backendMapping";
 import { deriveCareLoopStatus, deriveDisplayStatus } from "../lib/displayStatus";
 import { calculateRisk } from "../lib/riskEngine";
@@ -51,6 +53,7 @@ const storageKey = "careband-agent-demo-state-v0.1.3";
 const chenId = "E001";
 
 const READ_ONLY_NOTICE = "连接写操作将在下一切片实现";
+const WRITE_BLOCKED_NOTICE = "该操作尚未接入 connected 模式";
 
 const mockBackend = (): BackendConnectionState => ({
   status: "mock",
@@ -86,7 +89,9 @@ export type DemoAction =
   | { type: "SIMULATE_DATA_GAP" }
   | { type: "BACKEND_CONNECTING" }
   | { type: "BACKEND_CONNECTED"; payload: BackendSyncPayload }
-  | { type: "BACKEND_FAILED"; error: BackendSyncError };
+  | { type: "BACKEND_FAILED"; error: BackendSyncError }
+  | { type: "BACKEND_WRITE_FAILED"; error: BackendSyncError }
+  | { type: "BACKEND_WRITE_BLOCKED"; message: string };
 
 interface DemoContextValue {
   state: DemoState;
@@ -214,6 +219,78 @@ const hydrateFromBackend = (
   },
 });
 
+export interface ConnectedActionDeps {
+  postEvent: typeof postEvent;
+  patchTask: typeof patchTask;
+  fetchDashboard: typeof fetchDashboard;
+  mapDashboard: (data: unknown) => BackendSyncPayload;
+}
+
+const connectedDeps: ConnectedActionDeps = {
+  postEvent,
+  patchTask,
+  fetchDashboard,
+  mapDashboard: (data) => mapDashboard(data, mockProfilesRecord),
+};
+
+const writeFailure = (code: string, message: string): DemoAction => ({
+  type: "BACKEND_WRITE_FAILED",
+  error: { code, message },
+});
+
+export const executeConnectedAction = async (
+  state: DemoState,
+  action: DemoAction,
+  dispatch: Dispatch<DemoAction>,
+  inFlight: { current: boolean },
+  deps: ConnectedActionDeps = connectedDeps,
+): Promise<boolean> => {
+  if (state.backend.mode !== "backend") return false;
+  if (!["TRIGGER_SOS", "CAREGIVER_ACCEPT_TASK", "COMPLETE_CARE_TASK"].includes(action.type)) {
+    dispatch({ type: "BACKEND_WRITE_BLOCKED", message: WRITE_BLOCKED_NOTICE });
+    return true;
+  }
+  if (inFlight.current) {
+    dispatch({ type: "BACKEND_WRITE_BLOCKED", message: "操作正在同步，请稍候" });
+    return true;
+  }
+
+  inFlight.current = true;
+  try {
+    let result;
+    if (action.type === "TRIGGER_SOS") {
+      result = await deps.postEvent({ elder_id: chenId, event_type: "sos", source: "software_simulator", payload: {} });
+    } else {
+      const task = selectActiveTaskForElder(chenId, state.tasks);
+      const taskId = /^TASK-SRV-(\d+)$/.exec(task?.taskId ?? "")?.[1];
+      if (!taskId) {
+        dispatch(writeFailure("task_unavailable", "服务端任务不可用，请刷新后重试"));
+        return true;
+      }
+      result = await deps.patchTask(taskId, {
+        status: action.type === "CAREGIVER_ACCEPT_TASK" ? "in_progress" : "resolved",
+      });
+    }
+    if (result.status === "error") {
+      dispatch({ type: "BACKEND_WRITE_FAILED", error: result.error });
+      return true;
+    }
+    const refreshed = await deps.fetchDashboard();
+    if (refreshed.status === "mock") {
+      dispatch({ type: "BACKEND_WRITE_FAILED", error: refreshed.error });
+      return true;
+    }
+    try {
+      dispatch({ type: "BACKEND_CONNECTED", payload: deps.mapDashboard(refreshed.data) });
+    } catch {
+      dispatch(writeFailure("invalid_payload", "服务端刷新结果无效，请稍后重试"));
+    }
+    return true;
+  } finally {
+    inFlight.current = false;
+  }
+};
+
 export const demoReducer = (state: DemoState, action: DemoAction): DemoState => {
   // Read-only connected mode: local demo actions cannot mutate business data;
   // only a visible, safe notice is written.
@@ -221,6 +298,8 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
     action.type !== "BACKEND_CONNECTING" &&
     action.type !== "BACKEND_CONNECTED" &&
     action.type !== "BACKEND_FAILED" &&
+    action.type !== "BACKEND_WRITE_FAILED" &&
+    action.type !== "BACKEND_WRITE_BLOCKED" &&
     state.backend.mode === "backend"
   ) {
     return {
@@ -254,6 +333,13 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
       // only updating the backend error state and dropping any serverData.
       return { ...state, serverData: null, backend: failedBackend };
     }
+    case "BACKEND_WRITE_FAILED":
+      return {
+        ...state,
+        backend: { ...state.backend, status: "connected", error: action.error, readOnlyNotice: action.error.message },
+      };
+    case "BACKEND_WRITE_BLOCKED":
+      return { ...state, backend: { ...state.backend, readOnlyNotice: action.message } };
     case "RESET_DEMO":
       return createInitialDemoState();
     case "TRIGGER_CHEN_DIZZINESS": {
@@ -609,7 +695,15 @@ export const serializeForStorage = (
 };
 
 export const DemoProvider = ({ children }: { children: ReactNode }) => {
-  const [state, dispatch] = useReducer(demoReducer, undefined, loadInitialState);
+  const [state, rawDispatch] = useReducer(demoReducer, undefined, loadInitialState);
+  const writeInFlight = useRef(false);
+  const dispatch = useCallback<Dispatch<DemoAction>>((action) => {
+    if (state.backend.mode === "backend") {
+      void executeConnectedAction(state, action, rawDispatch, writeInFlight);
+    } else {
+      rawDispatch(action);
+    }
+  }, [state]);
 
   // Mock mode persists local changes; connected data stays in-memory only.
   useEffect(() => {
@@ -626,16 +720,16 @@ export const DemoProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     let cancelled = false;
     const sync = async () => {
-      dispatch({ type: "BACKEND_CONNECTING" });
+      rawDispatch({ type: "BACKEND_CONNECTING" });
       const result = await fetchDashboard();
       if (cancelled) return;
       if (result.status === "connected") {
         try {
           const payload = mapDashboard(result.data, mockProfilesRecord);
-          if (!cancelled) dispatch({ type: "BACKEND_CONNECTED", payload });
+          if (!cancelled) rawDispatch({ type: "BACKEND_CONNECTED", payload });
         } catch {
           if (!cancelled) {
-            dispatch({
+            rawDispatch({
               type: "BACKEND_FAILED",
               error: {
                 code: "invalid_payload",
@@ -645,7 +739,7 @@ export const DemoProvider = ({ children }: { children: ReactNode }) => {
           }
         }
       } else if (!cancelled) {
-        dispatch({ type: "BACKEND_FAILED", error: result.error });
+        rawDispatch({ type: "BACKEND_FAILED", error: result.error });
       }
     };
     void sync();
