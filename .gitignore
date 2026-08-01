@@ -15,3 +15,9 @@ backend/data/
 *.sqlite-*
 *.db
 *.db-*
+
+# Stage 10 — raw and derived Apple Health files stay local
+private_data/
+export.xml
+export.zip
+apple_health_export/
