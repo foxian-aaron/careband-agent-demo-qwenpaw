@@ -25,6 +25,11 @@ import { generateAgentSummaries } from "../lib/agentFormatter";
 import { fetchDashboard, patchTask, postEvent } from "../lib/apiClient";
 import { mapDashboard } from "../lib/backendMapping";
 import { deriveCareLoopStatus, deriveDisplayStatus } from "../lib/displayStatus";
+import {
+  buildConfirmedCareMemory,
+  sanitizeConfirmedMemories,
+  sanitizeMemoryDrafts,
+} from "../lib/memoryIntake";
 import { calculateRisk } from "../lib/riskEngine";
 import {
   getActiveTaskForElder as selectActiveTaskForElder,
@@ -37,7 +42,9 @@ import type {
   BackendSyncError,
   BackendSyncPayload,
   CareEvent,
+  CareMemoryDraft,
   CareTask,
+  ConfirmedCareMemory,
   ContactPerson,
   DailySnapshot,
   ElderProfile,
@@ -76,6 +83,8 @@ export interface DemoState {
   operationalStates: Record<string, OperationalState>;
   backend: BackendConnectionState;
   serverData: BackendSyncPayload | null;
+  memoryDraftsByElderId: Record<string, CareMemoryDraft>;
+  careMemoriesByElderId: Record<string, ConfirmedCareMemory>;
 }
 
 export type DemoAction =
@@ -91,7 +100,16 @@ export type DemoAction =
   | { type: "BACKEND_CONNECTED"; payload: BackendSyncPayload }
   | { type: "BACKEND_FAILED"; error: BackendSyncError }
   | { type: "BACKEND_WRITE_FAILED"; error: BackendSyncError }
-  | { type: "BACKEND_WRITE_BLOCKED"; message: string };
+  | { type: "BACKEND_WRITE_BLOCKED"; message: string }
+  | { type: "CREATE_MEMORY_DRAFT"; draft: CareMemoryDraft }
+  | {
+      type: "REVIEW_MEMORY_ITEM";
+      elderId: string;
+      itemId: string;
+      status: "confirmed" | "rejected";
+      updatedAt: string;
+    }
+  | { type: "SAVE_CARE_MEMORY"; elderId: string; confirmedAt: string };
 
 interface DemoContextValue {
   state: DemoState;
@@ -130,6 +148,8 @@ export const createInitialDemoState = (): DemoState => ({
   operationalStates: clone(mockOperationalStates),
   backend: mockBackend(),
   serverData: null,
+  memoryDraftsByElderId: {},
+  careMemoriesByElderId: {},
 });
 
 const addEventOnce = (events: CareEvent[], event: CareEvent) =>
@@ -209,6 +229,10 @@ const hydrateFromBackend = (
   events: payload.events,
   tasks: payload.tasks,
   operationalStates: payload.operationalStates,
+  // Stage 11 memory is explicitly Mock-only. Never mix local Mock memory with
+  // an authoritative backend view or imply that it came from the server.
+  memoryDraftsByElderId: {},
+  careMemoriesByElderId: {},
   serverData: payload,
   backend: {
     status: "connected",
@@ -342,6 +366,56 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
       return { ...state, backend: { ...state.backend, readOnlyNotice: action.message } };
     case "RESET_DEMO":
       return createInitialDemoState();
+    case "CREATE_MEMORY_DRAFT": {
+      const sanitized = sanitizeMemoryDrafts({
+        [action.draft.elderId]: action.draft,
+      })[action.draft.elderId];
+      if (!sanitized || sanitized.items.some((item) => item.reviewStatus !== "pending")) {
+        return state;
+      }
+      return {
+        ...state,
+        memoryDraftsByElderId: {
+          ...state.memoryDraftsByElderId,
+          [sanitized.elderId]: sanitized,
+        },
+      };
+    }
+    case "REVIEW_MEMORY_ITEM": {
+      const draft = state.memoryDraftsByElderId[action.elderId];
+      if (!draft || !draft.items.some((item) => item.id === action.itemId)) return state;
+      return {
+        ...state,
+        memoryDraftsByElderId: {
+          ...state.memoryDraftsByElderId,
+          [action.elderId]: {
+            ...draft,
+            updatedAt: action.updatedAt,
+            items: draft.items.map((item) =>
+              item.id === action.itemId
+                ? { ...item, reviewStatus: action.status, updatedAt: action.updatedAt }
+                : item,
+            ),
+          },
+        },
+      };
+    }
+    case "SAVE_CARE_MEMORY": {
+      const draft = state.memoryDraftsByElderId[action.elderId];
+      if (!draft) return state;
+      const memory = buildConfirmedCareMemory(draft, action.confirmedAt);
+      if (!memory) return state;
+      const { [action.elderId]: _reviewedDraft, ...remainingDrafts } =
+        state.memoryDraftsByElderId;
+      return {
+        ...state,
+        memoryDraftsByElderId: remainingDrafts,
+        careMemoriesByElderId: {
+          ...state.careMemoriesByElderId,
+          [action.elderId]: memory,
+        },
+      };
+    }
     case "TRIGGER_CHEN_DIZZINESS": {
       const existingActiveTask = selectActiveTaskForElder(chenId, state.tasks);
       const taskId = existingActiveTask?.taskId ?? nextTaskId(state.tasks, "TASK-E001-DIZZINESS");
@@ -667,6 +741,10 @@ const loadInitialState = () => {
       contacts: parsed.contacts ?? initial.contacts,
       profileDetails: parsed.profileDetails ?? initial.profileDetails,
       trends: parsed.trends ?? initial.trends,
+      memoryDraftsByElderId:
+        sanitizeMemoryDrafts(parsed.memoryDraftsByElderId),
+      careMemoriesByElderId:
+        sanitizeConfirmedMemories(parsed.careMemoriesByElderId),
       events: parsed.events ?? initial.events,
       tasks: parsed.tasks ?? initial.tasks,
       operationalStates: parsed.operationalStates ?? initial.operationalStates,

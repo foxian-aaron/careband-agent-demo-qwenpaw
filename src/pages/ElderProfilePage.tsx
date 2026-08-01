@@ -95,6 +95,7 @@ export const ElderProfilePage = ({ elderId }: ElderProfilePageProps) => {
         </div>
         <div className="button-row">
           <a className="primary-link" href={`#/elder/${profile.elderId}`}>返回状态驾驶舱</a>
+          <a className="text-button" href={`#/elder/${profile.elderId}/memory-intake`}>初始化照护记忆</a>
           <a className="text-button" href={`#/medication/${profile.elderId}`}>查看用药计划</a>
           <a className="text-button" href={`#/family/${profile.elderId}`}>查看家属安心卡</a>
           <a className="text-button" href="#/institution">查看机构端</a>

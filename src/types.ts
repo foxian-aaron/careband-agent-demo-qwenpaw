@@ -238,6 +238,46 @@ export interface ElderTrend {
   points: TrendPoint[];
 }
 
+export type MemorySourceType =
+  | "family_oral"
+  | "caregiver_input"
+  | "institution_record";
+
+export type CareMemoryCategory =
+  | "general_context"
+  | "communication_preference"
+  | "medication_routine"
+  | "safety_observation"
+  | "family_preference";
+
+export type MemoryReviewStatus = "pending" | "confirmed" | "rejected";
+export type MemoryVisibility = "caregiver" | "institution" | "family";
+
+export interface CareMemoryItem {
+  id: string;
+  elderId: string;
+  category: CareMemoryCategory;
+  content: string;
+  sourceType: MemorySourceType;
+  confidence: number;
+  reviewStatus: MemoryReviewStatus;
+  visibilityScope: MemoryVisibility[];
+  updatedAt: string;
+}
+
+export interface CareMemoryDraft {
+  elderId: string;
+  items: CareMemoryItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConfirmedCareMemory {
+  elderId: string;
+  items: CareMemoryItem[];
+  confirmedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Stage 6B — backend read-only sync types
 // ---------------------------------------------------------------------------
