@@ -13,6 +13,8 @@ import express from "express";
 
 import eventsRouter from "./routes/events.js";
 import tasksRouter from "./routes/tasks.js";
+import eldersRouter from "./routes/elders.js";
+import dashboardRouter from "./routes/dashboard.js";
 
 function healthHandler(_req, res) {
   res.status(200).json({
@@ -58,6 +60,10 @@ export function createApp() {
   // /api 404 fallthrough so their paths are matched first.
   application.use("/api/events", eventsRouter);
   application.use("/api/tasks", tasksRouter);
+  // Elders + dashboard READ routes (Stage 6A). Mounted before the /api 404
+  // fallthrough so their paths are matched first.
+  application.use("/api/elders", eldersRouter);
+  application.use("/api/dashboard", dashboardRouter);
   // Fallthrough for any other /api/* method/path -> JSON 404.
   application.use("/api", notFoundHandler);
   // Last resort for unexpected errors -> safe JSON 500.
