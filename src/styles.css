@@ -1477,3 +1477,43 @@ button.primary,
     grid-template-columns: 1fr;
   }
 }
+
+/* Stage 13 — consent & privacy */
+.consent-privacy-notice {
+  border-left: 4px solid var(--color-observation, #2f80a0);
+}
+
+.privacy-bullet-list {
+  display: grid;
+  gap: 0.5rem;
+  padding-left: 1.1rem;
+  margin: 0.5rem 0 0;
+}
+
+.privacy-bullet-list li {
+  line-height: 1.5;
+}
+
+.consent-authorize-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.family-failclosed-notice {
+  border-left: 4px solid var(--color-muted, #7b8494);
+}
+
+.family-voice-list {
+  display: grid;
+  gap: 0.5rem;
+  padding-left: 1.1rem;
+  margin: 0.25rem 0;
+}
+
+.family-voice-list li {
+  line-height: 1.5;
+}

@@ -5,6 +5,7 @@ import { DemoControlPage } from "./pages/DemoControlPage";
 import { DocsPage } from "./pages/DocsPage";
 import { ElderDashboardPage } from "./pages/ElderDashboardPage";
 import { ElderProfilePage } from "./pages/ElderProfilePage";
+import { ConsentPrivacyPage } from "./pages/ConsentPrivacyPage";
 import { FamilyPage } from "./pages/FamilyPage";
 import { InstitutionPage } from "./pages/InstitutionPage";
 import { MedicationPage } from "./pages/MedicationPage";
@@ -31,6 +32,18 @@ export const renderRoute = (path: string) => {
   const voiceCompanionMatch = path.match(/^\/elder\/([^/]+)\/voice$/);
   if (voiceCompanionMatch) {
     return <ElderVoiceCompanionPage key={voiceCompanionMatch[1]} elderId={voiceCompanionMatch[1]} />;
+  }
+  const caregiverPrivacyMatch = path.match(/^\/caregiver\/elder\/([^/]+)\/privacy$/);
+  if (caregiverPrivacyMatch) {
+    return <ConsentPrivacyPage key={caregiverPrivacyMatch[1]} elderId={caregiverPrivacyMatch[1]} viewerRole="caregiver" />;
+  }
+  const privacyMatch = path.match(/^\/elder\/([^/]+)\/privacy$/);
+  if (privacyMatch) {
+    return <ConsentPrivacyPage key={privacyMatch[1]} elderId={privacyMatch[1]} viewerRole="elder" />;
+  }
+  const familyPrivacyMatch = path.match(/^\/family\/([^/]+)\/privacy$/);
+  if (familyPrivacyMatch) {
+    return <ConsentPrivacyPage key={familyPrivacyMatch[1]} elderId={familyPrivacyMatch[1]} viewerRole="family" />;
   }
   if (path.startsWith("/elder/") && path.endsWith("/profile")) {
     return <ElderProfilePage elderId={path.split("/")[2] || "E001"} />;

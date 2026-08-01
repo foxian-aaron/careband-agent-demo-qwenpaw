@@ -217,7 +217,6 @@ describe("familyCopy", () => {
       risk,
       display,
       byId(mockSnapshots, "E001"),
-      mockEvents.filter((event) => event.elderId === "E001"),
     );
 
     expect(message).toContain("王叔");
@@ -241,9 +240,9 @@ describe("familyCopy", () => {
       risk,
       display,
       state.snapshots.E001,
-      events,
       undefined,
       careLoopStatus,
+      true,
     );
 
     expect(message).toContain("已查看");

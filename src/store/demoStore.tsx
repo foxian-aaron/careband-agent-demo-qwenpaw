@@ -36,6 +36,12 @@ import {
   sanitizeVoiceSignal,
   sanitizeVoiceSignalsByElder,
 } from "../lib/elderVoiceCompanion";
+import {
+  selectFamilyVoiceMemorySummaries,
+  sanitizeFamilyConsentMap,
+  sanitizeVoiceReviewMap,
+  type VoiceReviewMap,
+} from "../lib/consentPrivacy";
 import { calculateRisk } from "../lib/riskEngine";
 import {
   getActiveTaskForElder as selectActiveTaskForElder,
@@ -62,6 +68,7 @@ import type {
   RiskResult,
   VoiceInteractionSignal,
   VoiceMemoryDraft,
+  VoiceMemoryReviewDecision,
 } from "../types";
 
 const storageKey = "careband-agent-demo-state-v0.1.3";
@@ -95,6 +102,12 @@ export interface DemoState {
   careMemoriesByElderId: Record<string, ConfirmedCareMemory>;
   voiceSignalsByElderId: Record<string, VoiceInteractionSignal[]>;
   voiceMemoryDraftsByElderId: Record<string, VoiceMemoryDraft[]>;
+  // Stage 13 — session-only Mock authorization & caregiver review. These are
+  // NEVER persisted to localStorage and NEVER restored on load, so a reload or
+  // backend hydration always starts from a clean (unauthorized / pending)
+  // state. Forged consent or confirmation cannot survive a session boundary.
+  familyConsentByElderId: Record<string, boolean>;
+  voiceReviewByElderId: Record<string, VoiceReviewMap>;
 }
 
 export type DemoAction =
@@ -125,7 +138,42 @@ export type DemoAction =
       elderId: string;
       signal: VoiceInteractionSignal;
       memoryDrafts: VoiceMemoryDraft[];
+    }
+  // Stage 13 — session-only Mock consent & caregiver voice review. Connected
+  // mode never executes these writes (the read-only guard blocks them).
+  | { type: "GRANT_FAMILY_CONSENT"; elderId: string; actorRole: "caregiver" }
+  | { type: "REVOKE_FAMILY_CONSENT"; elderId: string; actorRole: "caregiver" }
+  | {
+      type: "REVIEW_VOICE_DRAFT";
+      elderId: string;
+      draftId: string;
+      decision: VoiceMemoryReviewDecision;
+      actorRole: "caregiver";
     };
+
+export const grantFamilyConsentByCaregiver = (elderId: string): DemoAction => ({
+  type: "GRANT_FAMILY_CONSENT",
+  elderId,
+  actorRole: "caregiver",
+});
+
+export const revokeFamilyConsentByCaregiver = (elderId: string): DemoAction => ({
+  type: "REVOKE_FAMILY_CONSENT",
+  elderId,
+  actorRole: "caregiver",
+});
+
+export const reviewVoiceDraftByCaregiver = (
+  elderId: string,
+  draftId: string,
+  decision: VoiceMemoryReviewDecision,
+): DemoAction => ({
+  type: "REVIEW_VOICE_DRAFT",
+  elderId,
+  draftId,
+  decision,
+  actorRole: "caregiver",
+});
 
 interface DemoContextValue {
   state: DemoState;
@@ -168,6 +216,8 @@ export const createInitialDemoState = (): DemoState => ({
   careMemoriesByElderId: {},
   voiceSignalsByElderId: {},
   voiceMemoryDraftsByElderId: {},
+  familyConsentByElderId: {},
+  voiceReviewByElderId: {},
 });
 
 const addEventOnce = (events: CareEvent[], event: CareEvent) =>
@@ -253,6 +303,11 @@ const hydrateFromBackend = (
   careMemoriesByElderId: {},
   voiceSignalsByElderId: {},
   voiceMemoryDraftsByElderId: {},
+  // Stage 13 — session-only authorization & caregiver review are cleared when
+  // a backend view hydrates; the live backend is authoritative and must never
+  // carry a Mock-granted consent or a locally fabricated confirmation.
+  familyConsentByElderId: {},
+  voiceReviewByElderId: {},
   serverData: payload,
   backend: {
     status: "connected",
@@ -461,6 +516,45 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
             ...currentDrafts.filter((item) => !safeDrafts.some((draft) => draft.id === item.id)),
             ...safeDrafts,
           ].slice(-10),
+        },
+      };
+    }
+    case "GRANT_FAMILY_CONSENT": {
+      if (
+        action.actorRole !== "caregiver" ||
+        !state.profiles[action.elderId] ||
+        !state.profileDetails[action.elderId]?.consentStatus.familyCanViewVoiceSummary
+      ) return state;
+      return {
+        ...state,
+        familyConsentByElderId: {
+          ...state.familyConsentByElderId,
+          [action.elderId]: true,
+        },
+      };
+    }
+    case "REVOKE_FAMILY_CONSENT": {
+      if (
+        action.actorRole !== "caregiver" ||
+        !state.profiles[action.elderId]
+      ) return state;
+      const { [action.elderId]: _removed, ...remaining } =
+        state.familyConsentByElderId;
+      return {
+        ...state,
+        familyConsentByElderId: remaining,
+      };
+    }
+    case "REVIEW_VOICE_DRAFT": {
+      if (action.actorRole !== "caregiver") return state;
+      const drafts = state.voiceMemoryDraftsByElderId[action.elderId] ?? [];
+      if (!drafts.some((draft) => draft.id === action.draftId)) return state;
+      const current = state.voiceReviewByElderId[action.elderId] ?? {};
+      return {
+        ...state,
+        voiceReviewByElderId: {
+          ...state.voiceReviewByElderId,
+          [action.elderId]: { ...current, [action.draftId]: action.decision },
         },
       };
     }
@@ -779,17 +873,20 @@ export const loadInitialState = () => {
   try {
     const parsed = JSON.parse(saved) as Partial<DemoState>;
     const initial = createInitialDemoState();
-    const profiles = parsed.profiles ?? initial.profiles;
     const knownElderIds = new Set(Object.keys(initial.profiles));
     return {
       ...initial,
       ...parsed,
-      profiles,
+      // Profile identity is canonical Mock data; never trust a localStorage
+      // claim that fabricates a new elder or changes an existing identity.
+      profiles: initial.profiles,
       baselines: parsed.baselines ?? initial.baselines,
       snapshots: parsed.snapshots ?? initial.snapshots,
       medicationPlans: parsed.medicationPlans ?? initial.medicationPlans,
       contacts: parsed.contacts ?? initial.contacts,
-      profileDetails: parsed.profileDetails ?? initial.profileDetails,
+      // Profile consent is a canonical Mock baseline. Never hydrate a forged
+      // visibility grant from localStorage.
+      profileDetails: initial.profileDetails,
       trends: parsed.trends ?? initial.trends,
       memoryDraftsByElderId:
         sanitizeMemoryDrafts(parsed.memoryDraftsByElderId),
@@ -802,6 +899,13 @@ export const loadInitialState = () => {
       events: parsed.events ?? initial.events,
       tasks: parsed.tasks ?? initial.tasks,
       operationalStates: parsed.operationalStates ?? initial.operationalStates,
+      // Stage 13 — Mock authorization & caregiver review are session-only.
+      // Never restore them from storage even if an injected value is present;
+      // a reload always starts unauthorized and with every draft pending.
+      familyConsentByElderId:
+        sanitizeFamilyConsentMap(parsed.familyConsentByElderId),
+      voiceReviewByElderId:
+        sanitizeVoiceReviewMap(parsed.voiceReviewByElderId),
       // Always boot in Mock; connected data is never restored from storage —
       // the Provider re-syncs on mount. Server data stays in-memory only.
       backend: initial.backend,
@@ -816,13 +920,24 @@ export const loadInitialState = () => {
  * Pure persistence helper. Connected (server-derived) business data is never
  * written to localStorage: in backend mode the clean Mock baseline is returned
  * instead, so no server values ever reach storage. The returned object never
- * carries a serverData property at all (not even null).
+ * carries a serverData property at all (not even null). Stage 13 session-only
+ * authorization/review state is also stripped — it must never persist.
  */
 export const serializeForStorage = (
   state: DemoState,
-): Omit<DemoState, "serverData"> => {
+): Omit<
+  DemoState,
+  | "serverData"
+  | "familyConsentByElderId"
+  | "voiceReviewByElderId"
+> => {
   const source = state.backend.mode === "backend" ? createInitialDemoState() : state;
-  const { serverData, ...persistable } = source;
+  const {
+    serverData,
+    familyConsentByElderId: _consent,
+    voiceReviewByElderId: _reviews,
+    ...persistable
+  } = source;
   return { ...persistable, events: persistable.events.map(({ rawText, ...event }) => event) };
 };
 
@@ -942,5 +1057,27 @@ export const getAgentSummariesForElder = (
     risk,
     careLoopStatus,
     displayStatus,
+  );
+};
+
+/**
+ * Stage 13 — return only the family-safe voice memory summary strings for an
+ * elder. Applies the triple gate (consent field + session authorization +
+ * caregiver confirmed + family_summary) and never exposes the raw transcript,
+ * confidence, or internal attention level. Returns an empty array (fail-closed)
+ * when the elder is unknown or any gate is unsatisfied.
+ */
+export const getFamilyVoiceMemorySummaries = (
+  state: DemoState,
+  elderId: string,
+): string[] => {
+  const detail = state.profileDetails[elderId];
+  const consent = detail?.consentStatus;
+  const authorized = state.familyConsentByElderId[elderId] === true;
+  return selectFamilyVoiceMemorySummaries(
+    consent,
+    state.voiceMemoryDraftsByElderId[elderId] ?? [],
+    state.voiceReviewByElderId[elderId] ?? {},
+    authorized,
   );
 };
