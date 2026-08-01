@@ -8,6 +8,7 @@ import { ElderProfilePage } from "./pages/ElderProfilePage";
 import { FamilyPage } from "./pages/FamilyPage";
 import { InstitutionPage } from "./pages/InstitutionPage";
 import { MedicationPage } from "./pages/MedicationPage";
+import { WearableImportPage } from "./pages/WearableImportPage";
 
 const getCurrentPath = () => {
   const path = window.location.hash.replace(/^#/, "");
@@ -17,6 +18,10 @@ const getCurrentPath = () => {
 const renderRoute = (path: string) => {
   if (path === "/institution") return <InstitutionPage />;
   if (path === "/caregiver") return <CaregiverPage />;
+  const wearableImportMatch = path.match(/^\/elder\/([^/]+)\/wearable-import$/);
+  if (wearableImportMatch) {
+    return <WearableImportPage elderId={wearableImportMatch[1]} />;
+  }
   if (path.startsWith("/elder/") && path.endsWith("/profile")) {
     return <ElderProfilePage elderId={path.split("/")[2] || "E001"} />;
   }

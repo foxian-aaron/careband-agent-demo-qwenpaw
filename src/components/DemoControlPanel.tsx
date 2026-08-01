@@ -163,6 +163,11 @@ export const DemoControlPanel = ({ state, dispatch }: DemoControlPanelProps) => 
           模拟数据不足
         </button>
       </div>
+      <div className="page-link-row">
+        <a className="text-button" href="#/elder/TEST001/wearable-import">
+          导入 TEST001 CSV 日聚合数据
+        </a>
+      </div>
       <div className="panel">
         <div className="section-title">
           <span>当前事件列表</span>
