@@ -1,0 +1,6 @@
+elder_id,date,data_source,heart_rate_avg,resting_heart_rate,steps,active_minutes,sleep_duration,wear_time_hours,data_quality
+TEST001,2026-07-20,CSV Import,72,58,4200,35,7.5,22.0,92
+TEST001,2026-07-21,CSV Import,74,59,,40,7.0,21.5,88
+TEST001,2026-07-22,CSV Import,73,60,5100,50,8.0,23.0,95
+TEST001,2026-07-23,CSV Import,75,,3800,30,6.5,20.0,80
+TEST001,2026-07-24,CSV Import,71,57,6000,55,7.8,24.0,90
