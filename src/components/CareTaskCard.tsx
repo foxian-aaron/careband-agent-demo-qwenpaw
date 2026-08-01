@@ -12,6 +12,7 @@ interface CareTaskCardProps {
   careLoopStatus: CareLoopStatus;
   events: CareEvent[];
   medicationEvening: MedicationStatus;
+  connected: boolean;
   dispatch: Dispatch<DemoAction>;
 }
 
@@ -22,20 +23,20 @@ export const CareTaskCard = ({
   careLoopStatus,
   events,
   medicationEvening,
+  connected,
   dispatch,
 }: CareTaskCardProps) => {
   const isChen = profile.elderId === "E001";
   const isCompleted = task.status === "completed";
   const hasChecked = events.some((event) => event.eventType === "caregiver_checked");
   const canAccept = isChen && task.status === "pending";
-  const canMarkViewed = isChen && task.status === "in_progress" && !hasChecked;
+  const canMarkViewed = !connected && isChen && task.status === "in_progress" && !hasChecked;
   const canConfirmMedication =
-    isChen && task.status === "in_progress" && hasChecked && medicationEvening !== "confirmed";
+    !connected && isChen && task.status === "in_progress" && hasChecked && medicationEvening !== "confirmed";
   const canComplete =
     isChen &&
     task.status === "in_progress" &&
-    hasChecked &&
-    medicationEvening === "confirmed";
+    (connected || (hasChecked && medicationEvening === "confirmed"));
 
   return (
     <article className={`task-card priority-${task.priority}`}>
@@ -77,20 +78,24 @@ export const CareTaskCard = ({
         >
           接单
         </button>
-        <button
-          disabled={!canMarkViewed}
-          title={canMarkViewed ? "记录护工已到场查看" : "接单后才能标记已查看"}
-          onClick={() => dispatch({ type: "CAREGIVER_MARK_VIEWED" })}
-        >
-          标记已查看
-        </button>
-        <button
-          disabled={!canConfirmMedication}
-          title={canConfirmMedication ? "确认晚药后可完成记录" : "已查看后才能确认晚药"}
-          onClick={() => dispatch({ type: "CONFIRM_EVENING_MEDICATION" })}
-        >
-          确认晚药
-        </button>
+        {!connected ? (
+          <>
+            <button
+              disabled={!canMarkViewed}
+              title={canMarkViewed ? "记录护工已到场查看" : "接单后才能标记已查看"}
+              onClick={() => dispatch({ type: "CAREGIVER_MARK_VIEWED" })}
+            >
+              标记已查看
+            </button>
+            <button
+              disabled={!canConfirmMedication}
+              title={canConfirmMedication ? "确认晚药后可完成记录" : "已查看后才能确认晚药"}
+              onClick={() => dispatch({ type: "CONFIRM_EVENING_MEDICATION" })}
+            >
+              确认晚药
+            </button>
+          </>
+        ) : null}
         <button
           className="primary"
           disabled={!canComplete || isCompleted}

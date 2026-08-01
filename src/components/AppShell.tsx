@@ -11,7 +11,7 @@ const statusLabel = (status: string): string =>
   status === "connecting"
     ? "正在连接本地后端"
     : status === "connected"
-      ? "本地后端已连接（只读）"
+      ? "本地后端已连接"
       : "静态或离线 Mock fallback";
 
 const formatSyncedAt = (value: string | null): string => {

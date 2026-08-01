@@ -71,18 +71,22 @@ export const DemoControlPanel = ({ state, dispatch }: DemoControlPanelProps) => 
   const careLoopStatus = deriveCareLoopStatus(chenId, state.tasks, events);
   const displayStatus = deriveDisplayStatus(risk, careLoopStatus);
   const stage = getStage(state);
+  const connected = state.backend.mode === "backend";
   const hasVoice = events.some((event) => event.eventType === "voice_symptom");
-  const canTriggerDizziness = !hasVoice;
+  const canTriggerDizziness = !connected && !hasVoice;
+  const canTriggerSos = !connected || !task;
   const canAccept = Boolean(task && task.status === "pending");
-  const canMarkViewed = Boolean(task && task.status === "in_progress" && careLoopStatus === "in_progress");
+  const canMarkViewed = Boolean(!connected && task && task.status === "in_progress" && careLoopStatus === "in_progress");
   const canConfirmMedication = Boolean(
-    task && task.status === "in_progress" && careLoopStatus === "checked",
+    !connected && task && task.status === "in_progress" && careLoopStatus === "checked",
   );
   const canComplete = Boolean(
     task &&
       task.status === "in_progress" &&
-      state.snapshots[chenId].medicationEvening === "confirmed" &&
-      ["checked", "medication_confirmed"].includes(careLoopStatus),
+      (connected || (
+        state.snapshots[chenId].medicationEvening === "confirmed" &&
+        ["checked", "medication_confirmed"].includes(careLoopStatus)
+      )),
   );
 
   return (
@@ -111,7 +115,7 @@ export const DemoControlPanel = ({ state, dispatch }: DemoControlPanelProps) => 
         </div>
       </div>
       <div className="control-buttons">
-        <button onClick={() => dispatch({ type: "RESET_DEMO" })}>重置 Demo</button>
+        <button disabled={connected} onClick={() => dispatch({ type: "RESET_DEMO" })}>重置 Demo</button>
         <button
           className="primary"
           disabled={!canTriggerDizziness}
@@ -127,20 +131,24 @@ export const DemoControlPanel = ({ state, dispatch }: DemoControlPanelProps) => 
         >
           护工接单
         </button>
-        <button
-          disabled={!canMarkViewed}
-          title={canMarkViewed ? "记录护工到场查看" : "护工接单后才能标记已查看"}
-          onClick={() => dispatch({ type: "CAREGIVER_MARK_VIEWED" })}
-        >
-          标记已查看
-        </button>
-        <button
-          disabled={!canConfirmMedication}
-          title={canConfirmMedication ? "确认晚药状态" : "标记已查看后才能确认晚药"}
-          onClick={() => dispatch({ type: "CONFIRM_EVENING_MEDICATION" })}
-        >
-          确认晚药
-        </button>
+        {!connected ? (
+          <>
+            <button
+              disabled={!canMarkViewed}
+              title={canMarkViewed ? "记录护工到场查看" : "护工接单后才能标记已查看"}
+              onClick={() => dispatch({ type: "CAREGIVER_MARK_VIEWED" })}
+            >
+              标记已查看
+            </button>
+            <button
+              disabled={!canConfirmMedication}
+              title={canConfirmMedication ? "确认晚药状态" : "标记已查看后才能确认晚药"}
+              onClick={() => dispatch({ type: "CONFIRM_EVENING_MEDICATION" })}
+            >
+              确认晚药
+            </button>
+          </>
+        ) : null}
         <button
           disabled={!canComplete}
           title={canComplete ? "完成并写入护工备注" : "确认晚药后才能完成处理"}
@@ -148,10 +156,10 @@ export const DemoControlPanel = ({ state, dispatch }: DemoControlPanelProps) => 
         >
           完成护工处理
         </button>
-        <button onClick={() => dispatch({ type: "TRIGGER_SOS" })}>
+        <button disabled={!canTriggerSos} onClick={() => dispatch({ type: "TRIGGER_SOS" })}>
           触发 SOS 测试
         </button>
-        <button onClick={() => dispatch({ type: "SIMULATE_DATA_GAP" })}>
+        <button disabled={connected} onClick={() => dispatch({ type: "SIMULATE_DATA_GAP" })}>
           模拟数据不足
         </button>
       </div>
