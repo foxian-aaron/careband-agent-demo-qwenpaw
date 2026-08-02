@@ -278,6 +278,14 @@ export interface ConfirmedCareMemory {
   confirmedAt: string;
 }
 
+/**
+ * Stage 13 — session-only caregiver decision for a pending voice memory draft.
+ * Never persisted to localStorage and never restored on load: a fresh session
+ * always starts with every draft in the implicit "pending" state, so a reload
+ * cannot fabricate a confirmation or authorization.
+ */
+export type VoiceMemoryReviewDecision = "confirmed" | "rejected";
+
 export type VoiceCompanionIntent =
   | "companionship"
   | "symptom_report"

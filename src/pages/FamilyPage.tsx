@@ -1,10 +1,13 @@
 import { FamilyPeaceCard } from "../components/FamilyPeaceCard";
+import { FamilyVoiceMemoryCard } from "../components/FamilyVoiceMemoryCard";
 import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import { deriveCareLoopStatus, deriveDisplayStatus } from "../lib/displayStatus";
 import { buildFamilyStatusMessage } from "../lib/familyCopy";
+import { getConsentStatusForElder } from "../lib/profileSelectors";
 import {
   getActiveTaskForElder,
   getEventsForElder,
+  getFamilyVoiceMemorySummaries,
   getRiskForElder,
   useDemo,
 } from "../store/demoStore";
@@ -15,22 +18,40 @@ interface FamilyPageProps {
 
 export const FamilyPage = ({ elderId }: FamilyPageProps) => {
   const { state } = useDemo();
-  const profile = state.profiles[elderId] ?? state.profiles.E001;
-  const snapshot = state.snapshots[profile.elderId];
-  const risk = getRiskForElder(state, profile.elderId);
-  const task = getActiveTaskForElder(state, profile.elderId);
-  const events = getEventsForElder(state, profile.elderId);
-  const careLoopStatus = deriveCareLoopStatus(profile.elderId, state.tasks, events);
+  const profile = state.profiles[elderId];
+
+  // Requirement 5: an unknown elder must never silently fall back to E001.
+  if (!profile) {
+    return (
+      <div className="page family-page">
+        <section className="panel empty-state">
+          <strong>未找到该长者</strong>
+          <p>家属端只展示已存在的虚构长者，系统不会自动回退到其他档案。</p>
+          <a className="primary-link" href="#/institution">返回机构总览</a>
+        </section>
+      </div>
+    );
+  }
+
+  const consent = getConsentStatusForElder(elderId, state);
+  const snapshot = state.snapshots[elderId];
+  const risk = getRiskForElder(state, elderId);
+  const task = getActiveTaskForElder(state, elderId);
+  const events = getEventsForElder(state, elderId);
+  const careLoopStatus = deriveCareLoopStatus(elderId, state.tasks, events);
   const displayStatus = deriveDisplayStatus(risk, careLoopStatus);
   const exceptionText = buildFamilyStatusMessage(
     profile,
     risk,
     displayStatus,
     snapshot,
-    events,
     task,
     careLoopStatus,
+    consent?.familyCanViewMedicationStatus ?? false,
   );
+  // Stage 13 — only fixed, pre-gated summary strings reach the family surface.
+  const familyVoiceSummaries = getFamilyVoiceMemorySummaries(state, elderId);
+  const canViewDaily = consent?.familyCanViewDailyStatus ?? false;
 
   return (
     <div className="page family-page">
@@ -41,15 +62,24 @@ export const FamilyPage = ({ elderId }: FamilyPageProps) => {
           <p>给家属看得懂、不过度制造焦虑的照护状态摘要。</p>
         </div>
       </header>
-      <FamilyPeaceCard
-        profile={profile}
-        snapshot={snapshot}
-        risk={risk}
-        displayStatus={displayStatus}
-        careLoopStatus={careLoopStatus}
-        task={task}
-        exceptionText={exceptionText}
-      />
+      {canViewDaily ? (
+        <FamilyPeaceCard
+          profile={profile}
+          snapshot={snapshot}
+          risk={risk}
+          displayStatus={displayStatus}
+          careLoopStatus={careLoopStatus}
+          task={task}
+          exceptionText={exceptionText}
+          consent={consent}
+        />
+      ) : (
+        <section className="panel family-failclosed-notice">
+          <strong>家属今日安心卡暂未授权可见</strong>
+          <p>该长者尚未授权家属查看今日安心卡，系统不会未经授权展示照护状态。</p>
+        </section>
+      )}
+      <FamilyVoiceMemoryCard summaries={familyVoiceSummaries} />
       <section className="panel gentle-summary">
         <div className="section-title">
           <span>温和说明</span>
@@ -59,9 +89,16 @@ export const FamilyPage = ({ elderId }: FamilyPageProps) => {
           系统会把复杂的步数、睡眠、用药和事件判断转成照护状态，不展示复杂医学指标。
           如有持续不适或紧急情况，将由照护人员或专业医疗人员判断处理。
         </p>
+        {consent?.familyCanViewMedicationStatus ? (
+          <div className="button-row page-link-row">
+            <a className="text-button" href={`#/medication/${elderId}`}>
+              查看今日用药状态
+            </a>
+          </div>
+        ) : null}
         <div className="button-row page-link-row">
-          <a className="text-button" href={`#/medication/${profile.elderId}`}>
-            查看今日用药状态
+          <a className="text-button" href={`#/family/${elderId}/privacy`}>
+            查看隐私与授权说明
           </a>
         </div>
       </section>

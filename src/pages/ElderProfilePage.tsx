@@ -18,7 +18,19 @@ interface ElderProfilePageProps {
 
 export const ElderProfilePage = ({ elderId }: ElderProfilePageProps) => {
   const { state } = useDemo();
-  const profile = state.profiles[elderId] ?? state.profiles.E001;
+  const profile = state.profiles[elderId];
+
+  if (!profile) {
+    return (
+      <div className="page">
+        <section className="panel empty-state">
+          <strong>未找到该长者</strong>
+          <p>长者 ID“{elderId}”不存在，系统不会自动回退到其他档案。</p>
+          <a className="primary-link" href="#/institution">返回机构总览</a>
+        </section>
+      </div>
+    );
+  }
   const detail = getProfileDetail(profile.elderId, state);
   const baseline = state.baselines[profile.elderId];
   const snapshot = state.snapshots[profile.elderId];
@@ -80,7 +92,7 @@ export const ElderProfilePage = ({ elderId }: ElderProfilePageProps) => {
         <CareTeamCard {...careTeam} />
       </section>
 
-      <ConsentStatusCard consent={detail?.consentStatus} />
+      <ConsentStatusCard consent={detail?.consentStatus} elderId={elderId} />
 
       <RiskSummaryCard
         risk={risk}
@@ -97,6 +109,7 @@ export const ElderProfilePage = ({ elderId }: ElderProfilePageProps) => {
           <a className="primary-link" href={`#/elder/${profile.elderId}`}>返回状态驾驶舱</a>
           <a className="text-button" href={`#/elder/${profile.elderId}/memory-intake`}>初始化照护记忆</a>
           <a className="text-button" href={`#/elder/${profile.elderId}/voice`}>语音陪伴文字模拟</a>
+          <a className="text-button" href={`#/caregiver/elder/${profile.elderId}/privacy`}>护工隐私授权演示</a>
           <a className="text-button" href={`#/medication/${profile.elderId}`}>查看用药计划</a>
           <a className="text-button" href={`#/family/${profile.elderId}`}>查看家属安心卡</a>
           <a className="text-button" href="#/institution">查看机构端</a>
