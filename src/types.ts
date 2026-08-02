@@ -278,6 +278,41 @@ export interface ConfirmedCareMemory {
   confirmedAt: string;
 }
 
+export type VoiceCompanionIntent =
+  | "companionship"
+  | "symptom_report"
+  | "medication_question"
+  | "past_memory"
+  | "loneliness_expression"
+  | "location_confusion"
+  | "caregiver_request"
+  | "general";
+
+export type VoiceAttentionLevel = "routine" | "review" | "immediate_review";
+
+export interface VoiceInteractionSignal {
+  signalId: string;
+  elderId: string;
+  timestamp: string;
+  transcriptSummary: string;
+  detectedIntent: VoiceCompanionIntent;
+  attentionLevel: VoiceAttentionLevel;
+  shouldNotifyCaregiver: boolean;
+  retentionPolicy: "summary_only";
+}
+
+export interface VoiceMemoryDraft {
+  id: string;
+  elderId: string;
+  memoryType: "past_story" | "life_preference" | "daily_rhythm";
+  contentSummary: string;
+  confidence: number;
+  reviewStatus: "pending";
+  visibility: "caregiver_only" | "family_summary";
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Stage 6B — backend read-only sync types
 // ---------------------------------------------------------------------------

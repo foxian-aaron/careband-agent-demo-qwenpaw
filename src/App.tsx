@@ -9,6 +9,7 @@ import { FamilyPage } from "./pages/FamilyPage";
 import { InstitutionPage } from "./pages/InstitutionPage";
 import { MedicationPage } from "./pages/MedicationPage";
 import { MemoryIntakePage } from "./pages/MemoryIntakePage";
+import { ElderVoiceCompanionPage } from "./pages/ElderVoiceCompanionPage";
 import { WearableImportPage } from "./pages/WearableImportPage";
 
 const getCurrentPath = () => {
@@ -16,7 +17,7 @@ const getCurrentPath = () => {
   return path || "/institution";
 };
 
-const renderRoute = (path: string) => {
+export const renderRoute = (path: string) => {
   if (path === "/institution") return <InstitutionPage />;
   if (path === "/caregiver") return <CaregiverPage />;
   const wearableImportMatch = path.match(/^\/elder\/([^/]+)\/wearable-import$/);
@@ -26,6 +27,10 @@ const renderRoute = (path: string) => {
   const memoryIntakeMatch = path.match(/^\/elder\/([^/]+)\/memory-intake$/);
   if (memoryIntakeMatch) {
     return <MemoryIntakePage key={memoryIntakeMatch[1]} elderId={memoryIntakeMatch[1]} />;
+  }
+  const voiceCompanionMatch = path.match(/^\/elder\/([^/]+)\/voice$/);
+  if (voiceCompanionMatch) {
+    return <ElderVoiceCompanionPage key={voiceCompanionMatch[1]} elderId={voiceCompanionMatch[1]} />;
   }
   if (path.startsWith("/elder/") && path.endsWith("/profile")) {
     return <ElderProfilePage elderId={path.split("/")[2] || "E001"} />;

@@ -30,6 +30,12 @@ import {
   sanitizeConfirmedMemories,
   sanitizeMemoryDrafts,
 } from "../lib/memoryIntake";
+import {
+  sanitizeVoiceDraftsByElder,
+  sanitizeVoiceMemoryDraft,
+  sanitizeVoiceSignal,
+  sanitizeVoiceSignalsByElder,
+} from "../lib/elderVoiceCompanion";
 import { calculateRisk } from "../lib/riskEngine";
 import {
   getActiveTaskForElder as selectActiveTaskForElder,
@@ -54,6 +60,8 @@ import type {
   OperationalState,
   PersonalBaseline,
   RiskResult,
+  VoiceInteractionSignal,
+  VoiceMemoryDraft,
 } from "../types";
 
 const storageKey = "careband-agent-demo-state-v0.1.3";
@@ -85,6 +93,8 @@ export interface DemoState {
   serverData: BackendSyncPayload | null;
   memoryDraftsByElderId: Record<string, CareMemoryDraft>;
   careMemoriesByElderId: Record<string, ConfirmedCareMemory>;
+  voiceSignalsByElderId: Record<string, VoiceInteractionSignal[]>;
+  voiceMemoryDraftsByElderId: Record<string, VoiceMemoryDraft[]>;
 }
 
 export type DemoAction =
@@ -109,7 +119,13 @@ export type DemoAction =
       status: "confirmed" | "rejected";
       updatedAt: string;
     }
-  | { type: "SAVE_CARE_MEMORY"; elderId: string; confirmedAt: string };
+  | { type: "SAVE_CARE_MEMORY"; elderId: string; confirmedAt: string }
+  | {
+      type: "ADD_VOICE_COMPANION_RESULT";
+      elderId: string;
+      signal: VoiceInteractionSignal;
+      memoryDrafts: VoiceMemoryDraft[];
+    };
 
 interface DemoContextValue {
   state: DemoState;
@@ -150,6 +166,8 @@ export const createInitialDemoState = (): DemoState => ({
   serverData: null,
   memoryDraftsByElderId: {},
   careMemoriesByElderId: {},
+  voiceSignalsByElderId: {},
+  voiceMemoryDraftsByElderId: {},
 });
 
 const addEventOnce = (events: CareEvent[], event: CareEvent) =>
@@ -233,6 +251,8 @@ const hydrateFromBackend = (
   // an authoritative backend view or imply that it came from the server.
   memoryDraftsByElderId: {},
   careMemoriesByElderId: {},
+  voiceSignalsByElderId: {},
+  voiceMemoryDraftsByElderId: {},
   serverData: payload,
   backend: {
     status: "connected",
@@ -413,6 +433,34 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
         careMemoriesByElderId: {
           ...state.careMemoriesByElderId,
           [action.elderId]: memory,
+        },
+      };
+    }
+    case "ADD_VOICE_COMPANION_RESULT": {
+      if (!state.profiles[action.elderId]) return state;
+      const signal = sanitizeVoiceSignal(action.signal, action.elderId);
+      if (!signal || !Array.isArray(action.memoryDrafts) || action.memoryDrafts.length > 2) return state;
+      const safeDrafts = action.memoryDrafts
+        .map((draft) => sanitizeVoiceMemoryDraft(draft, action.elderId))
+        .filter((draft): draft is VoiceMemoryDraft => Boolean(draft));
+      if (safeDrafts.length !== action.memoryDrafts.length || safeDrafts.length > 2) return state;
+      const currentSignals = state.voiceSignalsByElderId[action.elderId] ?? [];
+      const currentDrafts = state.voiceMemoryDraftsByElderId[action.elderId] ?? [];
+      return {
+        ...state,
+        voiceSignalsByElderId: {
+          ...state.voiceSignalsByElderId,
+          [action.elderId]: [
+            ...currentSignals.filter((item) => item.signalId !== signal.signalId),
+            signal,
+          ].slice(-20),
+        },
+        voiceMemoryDraftsByElderId: {
+          ...state.voiceMemoryDraftsByElderId,
+          [action.elderId]: [
+            ...currentDrafts.filter((item) => !safeDrafts.some((draft) => draft.id === item.id)),
+            ...safeDrafts,
+          ].slice(-10),
         },
       };
     }
@@ -724,17 +772,19 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
   }
 };
 
-const loadInitialState = () => {
+export const loadInitialState = () => {
   if (typeof window === "undefined") return createInitialDemoState();
   const saved = window.localStorage.getItem(storageKey);
   if (!saved) return createInitialDemoState();
   try {
     const parsed = JSON.parse(saved) as Partial<DemoState>;
     const initial = createInitialDemoState();
+    const profiles = parsed.profiles ?? initial.profiles;
+    const knownElderIds = new Set(Object.keys(initial.profiles));
     return {
       ...initial,
       ...parsed,
-      profiles: parsed.profiles ?? initial.profiles,
+      profiles,
       baselines: parsed.baselines ?? initial.baselines,
       snapshots: parsed.snapshots ?? initial.snapshots,
       medicationPlans: parsed.medicationPlans ?? initial.medicationPlans,
@@ -745,6 +795,10 @@ const loadInitialState = () => {
         sanitizeMemoryDrafts(parsed.memoryDraftsByElderId),
       careMemoriesByElderId:
         sanitizeConfirmedMemories(parsed.careMemoriesByElderId),
+      voiceSignalsByElderId:
+        sanitizeVoiceSignalsByElder(parsed.voiceSignalsByElderId, knownElderIds),
+      voiceMemoryDraftsByElderId:
+        sanitizeVoiceDraftsByElder(parsed.voiceMemoryDraftsByElderId, knownElderIds),
       events: parsed.events ?? initial.events,
       tasks: parsed.tasks ?? initial.tasks,
       operationalStates: parsed.operationalStates ?? initial.operationalStates,
