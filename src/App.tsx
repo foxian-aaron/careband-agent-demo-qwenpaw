@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "./components/AppShell";
+import { BackendContractPage } from "./pages/BackendContractPage";
 import { CaregiverPage } from "./pages/CaregiverPage";
 import { DemoControlPage } from "./pages/DemoControlPage";
 import { DocsPage } from "./pages/DocsPage";
@@ -10,6 +11,7 @@ import { FamilyPage } from "./pages/FamilyPage";
 import { InstitutionPage } from "./pages/InstitutionPage";
 import { MedicationPage } from "./pages/MedicationPage";
 import { MemoryIntakePage } from "./pages/MemoryIntakePage";
+import { PilotPlanPage } from "./pages/PilotPlanPage";
 import { ElderVoiceCompanionPage } from "./pages/ElderVoiceCompanionPage";
 import { EventSimulatorPage } from "./pages/EventSimulatorPage";
 import { WearableImportPage } from "./pages/WearableImportPage";
@@ -21,6 +23,8 @@ const getCurrentPath = () => {
 
 export const renderRoute = (path: string) => {
   if (path === "/institution") return <InstitutionPage />;
+  if (path === "/backend-contract") return <BackendContractPage />;
+  if (path === "/pilot-plan") return <PilotPlanPage />;
   if (path === "/caregiver") return <CaregiverPage />;
   if (path === "/event-simulator") return <EventSimulatorPage />;
   const wearableImportMatch = path.match(/^\/elder\/([^/]+)\/wearable-import$/);
