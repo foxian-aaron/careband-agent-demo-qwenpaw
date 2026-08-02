@@ -117,14 +117,31 @@
 - 真实 smoke：`actual_provider=qwenpaw`、`provider=zhipu-cn-codingplan`、`model=glm-5.2`、`fallback_used=false`、`validation_status=valid`、Chat ID `f86d8f91-f13a-4783-a757-6f65a37badd7`。
 - QwenPaw Builder Chat `78c56a13-a1b6-400a-9a9f-bca6750d9089` 空历史且无文件变化，216 秒后为节省 Token 安全停止；Codex 按用户授权完成精确实现并在外部 `PHASE-18.md` 登记。
 
-## 9. 当前未完成项与安全债务
+## 9. Stage 19 — 最终收尾与依赖升级
+
+- 范围：升级前端构建工具链，关闭遗留安全债务，交付 Stage 11–18 堆叠分支。
+- 构建工具链升级（`package.json` / `package-lock.json`）：Vite `8.2.0`、Vitest `4.1.10`、`@vitejs/plugin-react` `5.2.0`。
+- 兼容修复（`tsconfig.json`，单字段）：`compilerOptions.moduleResolution` 由 `Node` 改为 `Bundler`，以匹配 Vite 8 的模块解析约定；其余字段不变。
+- QwenPaw 客户端留痕：主任务 Chat `2591ebc1-de0c-4861-a6fc-3e17895d7370` 完成依赖升级与大部分测试后停在构建兼容判断，由 Codex 安全 stop；Repair 01 Chat `16d64fb4-df18-4973-85ad-7b5919dd7c59` 完成 `tsconfig` 与初版文档；Repair 02 Chat `a767cefb-f4a6-48f8-b074-f2b8aef4cb11` 按 Node 22 独立证据修正状态文档。三条 Chat 均保留在 QwenPaw Desktop。
+- 本轮实测门禁：repository / verification / 前端 207/207 / 后端 219/219 / three-run 3/3 全部通过；`npm run build` 在修复 `moduleResolution` 后通过。
+- 三轮 Agent 证据**仍为显式 Mock**（`real_qwenpaw_runtime_called=false`）；真实 GLM-5.2 仍只有 Stage 18 的单次 smoke，未在 Stage 19 重复。
+- 依赖漏洞复核：本轮在根目录与 `backend/` 分别运行 `npm audit --audit-level=high`，均 `found 0 vulnerabilities`。Stage 1 登记的旧安全债务已复核清零。
+- GitHub 交付：PR #29–#36 已合并；Stage 18 运行时 Agent 闭环已正式闭环。
+- GitHub Pages：仓库已启用 GitHub Actions 发布模式，静态 Mock 预览首次部署 run `30731249957` 已通过。
+
+### 9.1 环境与注意
+
+- 历史事实：QwenPaw 在 Stage 19 Repair 01 未持续保留已发现的 Node 22 PATH，因而把 build 与 audit 跑在系统 Node `24.18.0` 下；按 ADR-01，该结果仅登记为本机实测，不计正式验证。
+- Codex 独立正式复核：使用真实 Node `v22.23.1` 与锁文件在同一 Worktree 重跑全部门禁——repository boundary 184 files PASS、verification 4/4 PASS、前端 19 files / 207 tests PASS（Vitest 4.1.10）、后端 219 PASS、three-run 3/3 PASS（仍为 `explicit_mock_not_fallback`）、Vite 8.2.0 build PASS（85 modules）、根目录 `npm audit` 0、backend `npm audit` 0、`git diff --check` PASS。Stage 19 的 Node 22.x 正式复核已通过，无需再复测。
+
+## 10. 封版状态与安全债务
 
 | 项目 | 说明 |
 |---|---|
-| 依赖漏洞复核 | Stage 1 的 `npm ci` 曾报告 3 moderate、2 high、1 critical；当前版本尚未重新运行并登记 `npm audit`，不得宣称已解决，也不得自动 `npm audit fix --force` |
-| Stage 11–18 GitHub 交付 | GitHub 登录恢复前不 Push/PR/Merge |
+| GitHub Pages 预览 | 已启用 GitHub Actions 发布；首次静态 Mock 预览部署 run `30731249957` 通过 |
+| 软件封版阻塞 | 无；根与 backend `npm audit` 均 0，Node 22 全量门禁通过 |
 
-## 10. 约束备忘
+## 11. 约束备忘
 
 - Node 24 不得用于正式验证。
 - 所有 Codex 干预必须在本文件、外部 `PHASE-*.md` 或 PR 描述中登记。
