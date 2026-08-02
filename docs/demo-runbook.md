@@ -1,0 +1,22 @@
+# 三分钟软件 Demo Runbook
+
+## 准备
+
+1. 用 Node 22 安装依赖并分别启动后端、前端。
+2. 打开 `#/institution`，确认 connected；若显示 Mock，先修复后端，不得假装联网。
+3. 不使用真实长者、真实 XML、真实语音或精确位置。
+
+## 主线
+
+1. **机构端**：展示统计和多角色入口，说明 TEST001 不计入服务人数。
+2. **CSV**：进入 `#/elder/TEST001/wearable-import`，预览、确认、查看 history；再次确认说明日期幂等覆盖。
+3. **软件 SOS**：进入 `#/event-simulator` 发送 E001 SOS，指出 `source="software_simulator"` 且客户端未提交风险字段。
+4. **规则与任务**：展示后端 `urgent` 和 open task；在护工端依次 acknowledged、in_progress、resolved，确认事件关闭且风险不再 urgent。
+5. **摘要证据**：当前 family/institution 页面摘要只称 Mock，不声称由 GLM-5.2 生成。Provider、校验、修复和 fallback 的实现证据通过 Stage 16 evidence 或自动测试展示；公共 Agent 编排闭合前，不把真实 trace 列入页面 Demo。
+6. **记忆/语音**：展示 pending→人工确认，以及文字陪伴的 `summary_only`。
+7. **授权**：护工确认并授权后，家属才看到摘要；撤回后立即隐藏。
+8. **契约/试点**：展示 backend-contract 与 pilot-plan，明确试点是计划。
+
+`npm run verify:three-runs` 连续三轮覆盖 CSV、SOS、任务关闭、显式 Mock 摘要和 Dashboard round-trip。它不调用真实 QwenPaw；真实 GLM-5.2 必须在公共 Agent 编排闭合后另做 smoke，并在页面加入可核验 trace。
+
+禁止声称已经接入实体手环、完成养老院试点、用 Mock 代替 GLM 成功，或诊断疾病/建议药量。

@@ -18,7 +18,7 @@
 
 - **决定**：后端用 Express + SQLite，单进程部署。
 - **理由**：轻量、零外部依赖（无独立 DB 服务）、本地完整模式可一键启动。
-- **后果**：不适合高并发生产环境，但满足 Demo 与试点验证需求。数据库 schema 见 `backend/src/schema.sql`（待实现）。
+- **后果**：不适合高并发生产环境，但满足本地 Demo 验证需求。数据库 schema 已实现于 `backend/src/schema.sql`。
 
 ---
 
@@ -26,7 +26,7 @@
 
 - **决定**：`status_level`、`risk_score`、`key_reasons`、`recommended_action` 四个字段**仅由服务端确定性规则引擎计算**。
 - **理由**：可审计、可复现、可单元测试；消除 LLM 随机性带来的风险判定漂移。
-- **后果**：Agent（LLM）不参与风险判定，仅生成摘要。六级规则引擎是核心后端模块（待实现）。
+- **后果**：Agent（LLM）不参与风险判定，仅生成摘要。六级规则引擎已实现于 `backend/src/rules/riskEngine.js`。
 
 ---
 
@@ -34,7 +34,7 @@
 
 - **决定**：所有事件进入系统前必须映射到统一的 canonical event schema。
 - **理由**：前端、后端、Agent、模拟器使用同一种事件表示，减少转换层与不一致。
-- **后果**：需要定义 canonical event 格式并在各入口点强制校验（待实现）。
+- **后果**：canonical event 已在 `backend/src/eventContract.js` 定义并由事件入口强制校验。
 
 ---
 
@@ -42,7 +42,7 @@
 
 - **决定**：Agent 摘要固定使用 GLM-5.2；通过 `qwenpawProvider.js` 建立模型无关 SSE 桥。传输桥在技术上**模型无关**，但**本项目当前运行时模型固定为 GLM-5.2**；任何未来模型切换**必须新建一条架构决策记录**，不得自动切换或静默切换。
 - **理由**：固定模型保证可复现性；SSE 桥隔离模型差异，保留未来切换能力（但切换须经显式决策，不得静默发生）。
-- **后果**：`agentService.js` 与 `agentOrchestrator.js` 需围绕 GLM-5.2 的接口契约编写（待实现）。
+- **后果**：Provider 与 Agent Service 已按 GLM-5.2 合同实现；公共事件到 Agent 的自动编排仍是候选版缺口。
 
 ---
 
@@ -50,7 +50,7 @@
 
 - **决定**：Agent 输出必须通过 JSON Schema 校验；失败允许一次修复重试，再次失败则显式降级 Mock。
 - **理由**：下游消费者依赖结构化字段；静默吞错不可接受。
-- **后果**：需要 `agentOutputValidator.js` + `agent_output.schema.json`（待实现）；fallback 矩阵记录在 `docs/careband/fallback_matrix.md`。
+- **后果**：`agentOutputValidator.js` 与 `agent_output.schema.json` 已实现；fallback 矩阵记录在 `docs/fallback-matrix.md`。
 
 ---
 
