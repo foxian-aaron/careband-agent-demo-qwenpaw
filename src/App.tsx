@@ -8,6 +8,7 @@ import { ElderProfilePage } from "./pages/ElderProfilePage";
 import { FamilyPage } from "./pages/FamilyPage";
 import { InstitutionPage } from "./pages/InstitutionPage";
 import { MedicationPage } from "./pages/MedicationPage";
+import { MemoryIntakePage } from "./pages/MemoryIntakePage";
 import { WearableImportPage } from "./pages/WearableImportPage";
 
 const getCurrentPath = () => {
@@ -21,6 +22,10 @@ const renderRoute = (path: string) => {
   const wearableImportMatch = path.match(/^\/elder\/([^/]+)\/wearable-import$/);
   if (wearableImportMatch) {
     return <WearableImportPage elderId={wearableImportMatch[1]} />;
+  }
+  const memoryIntakeMatch = path.match(/^\/elder\/([^/]+)\/memory-intake$/);
+  if (memoryIntakeMatch) {
+    return <MemoryIntakePage key={memoryIntakeMatch[1]} elderId={memoryIntakeMatch[1]} />;
   }
   if (path.startsWith("/elder/") && path.endsWith("/profile")) {
     return <ElderProfilePage elderId={path.split("/")[2] || "E001"} />;

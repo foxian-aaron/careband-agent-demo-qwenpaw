@@ -1112,6 +1112,97 @@ button.primary,
   min-width: 860px;
 }
 
+.memory-privacy-notice p {
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin: 8px 0 0;
+}
+
+.memory-intake-form,
+.memory-intake-form label,
+.memory-review-list {
+  display: grid;
+  gap: 12px;
+}
+
+.memory-intake-form select,
+.memory-intake-form textarea {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  padding: 10px 12px;
+}
+
+.memory-intake-form textarea {
+  line-height: 1.65;
+  min-height: 150px;
+  resize: vertical;
+}
+
+.memory-input-footer,
+.memory-save-row,
+.memory-review-item,
+.memory-review-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.memory-review-item {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.memory-review-item p {
+  color: var(--text-secondary);
+  line-height: 1.65;
+  margin: 6px 0;
+}
+
+.memory-review-item small {
+  color: var(--text-secondary);
+}
+
+.memory-review-actions {
+  flex: 0 0 auto;
+}
+
+.memory-status {
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 5px 9px;
+}
+
+.memory-status--pending {
+  background: #fff4d6;
+  color: #6f5310;
+}
+
+.memory-status--confirmed {
+  background: #e7f5eb;
+  color: #275d35;
+}
+
+.memory-status--rejected {
+  background: #eceff3;
+  color: #5d6672;
+}
+
+.memory-save-row {
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.memory-confirmed-list {
+  color: var(--text-secondary);
+  line-height: 1.75;
+}
+
 .event-list {
   display: grid;
   gap: 10px;
@@ -1285,5 +1376,13 @@ button.primary,
 
   .import-summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .memory-input-footer,
+  .memory-save-row,
+  .memory-review-item,
+  .memory-review-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
