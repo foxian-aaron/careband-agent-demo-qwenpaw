@@ -7,6 +7,8 @@ const navItems = [
   { href: "#/family/E001", label: "家属端" },
   { href: "#/demo-control", label: "Demo 控制台" },
   { href: "#/event-simulator", label: "软件事件模拟器" },
+  { href: "#/backend-contract", label: "后端契约" },
+  { href: "#/pilot-plan", label: "试点计划" },
   { href: "#/docs", label: "文档" },
 ];
 
