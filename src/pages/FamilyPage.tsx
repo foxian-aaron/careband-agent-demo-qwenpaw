@@ -6,6 +6,7 @@ import { buildFamilyStatusMessage } from "../lib/familyCopy";
 import { getConsentStatusForElder } from "../lib/profileSelectors";
 import {
   getActiveTaskForElder,
+  getAgentSummariesForElder,
   getEventsForElder,
   getFamilyVoiceMemorySummaries,
   getRiskForElder,
@@ -52,6 +53,7 @@ export const FamilyPage = ({ elderId }: FamilyPageProps) => {
   // Stage 13 — only fixed, pre-gated summary strings reach the family surface.
   const familyVoiceSummaries = getFamilyVoiceMemorySummaries(state, elderId);
   const canViewDaily = consent?.familyCanViewDailyStatus ?? false;
+  const agentSummaries = getAgentSummariesForElder(state, elderId);
 
   return (
     <div className="page family-page">
@@ -79,6 +81,16 @@ export const FamilyPage = ({ elderId }: FamilyPageProps) => {
           <p>该长者尚未授权家属查看今日安心卡，系统不会未经授权展示照护状态。</p>
         </section>
       )}
+      {canViewDaily ? (
+        <section className="panel gentle-summary" aria-label="家属 Agent 摘要">
+          <div className="section-title">
+            <span>{agentSummaries.agentSource === "qwenpaw" ? "QwenPaw / GLM-5.2 摘要" : "Mock AI 摘要"}</span>
+            <h2>今日照护说明</h2>
+          </div>
+          <p>{agentSummaries.familySummary}</p>
+          {agentSummaries.warning ? <p role="status">{agentSummaries.warning}</p> : null}
+        </section>
+      ) : null}
       <FamilyVoiceMemoryCard summaries={familyVoiceSummaries} />
       <section className="panel gentle-summary">
         <div className="section-title">

@@ -5,7 +5,7 @@
 // yields a fixed sanitized error that never leaks body, URL, host or stack.
 
 import { describe, expect, it, vi } from "vitest";
-import { patchTask, postEvent } from "../lib/apiClient";
+import { patchTask, postAgentAnalyze, postEvent } from "../lib/apiClient";
 import {
   createInitialDemoState,
   demoReducer,
@@ -92,6 +92,49 @@ describe("patchTask request shape", () => {
   });
 });
 
+describe("postAgentAnalyze request shape", () => {
+  it("POSTs identity/linkage only and never accepts client risk or provider fields", async () => {
+    const sink = { url: "", init: undefined as RequestInit | undefined };
+    const result = await postAgentAnalyze("E001", {
+      sourceEventId: 17,
+      baseUrl: "",
+      fetchImpl: capture(sink, jsonRes({ ok: true }, 201)),
+    });
+    expect(result.status).toBe("ok");
+    expect(sink.url).toBe("/api/agent/analyze");
+    expect(sink.init?.method).toBe("POST");
+    expect(JSON.parse(sink.init?.body as string)).toEqual({ elder_id: "E001", source_event_id: 17 });
+    expect(sink.init?.body).not.toMatch(/status_level|risk_score|provider|model/);
+  });
+
+  it("uses a dedicated 70-second Agent timeout instead of the 6-second write timeout", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    try {
+      const pending = postAgentAnalyze("E001", {
+        baseUrl: "",
+        fetchImpl: (_input, init) => new Promise((_resolve, reject) => {
+          signal = init?.signal ?? undefined;
+          signal?.addEventListener("abort", () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          });
+        }),
+      });
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(64_000);
+      expect(signal?.aborted).toBe(true);
+      const result = await pending;
+      expect(result.status).toBe("error");
+      if (result.status === "error") expect(result.error.code).toBe("timeout");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 // --- B. static preview never fetches ---------------------------------------
 describe("static preview (null base) never fetches", () => {
   it("postEvent returns static_preview error without calling fetch", async () => {
@@ -120,6 +163,17 @@ describe("static preview (null base) never fetches", () => {
     expect(called).toBe(false);
     expect(r.status).toBe("error");
     if (r.status === "error") expect(r.error.code).toBe("static_preview");
+  });
+
+  it("postAgentAnalyze returns static_preview without calling fetch", async () => {
+    let called = false;
+    const result = await postAgentAnalyze("E001", {
+      baseUrl: null,
+      fetchImpl: () => { called = true; return Promise.resolve(new Response("")); },
+    });
+    expect(called).toBe(false);
+    expect(result.status).toBe("error");
+    if (result.status === "error") expect(result.error.code).toBe("static_preview");
   });
 });
 
@@ -266,6 +320,7 @@ const connectedState = (status: "pending" | "in_progress" = "pending"): DemoStat
 const orchestrationDeps = (overrides: Partial<ConnectedActionDeps> = {}): ConnectedActionDeps => ({
   postEvent: vi.fn().mockResolvedValue({ status: "ok", data: { ok: true } }) as ConnectedActionDeps["postEvent"],
   patchTask: vi.fn().mockResolvedValue({ status: "ok", data: { ok: true } }) as ConnectedActionDeps["patchTask"],
+  postAgentAnalyze: vi.fn().mockResolvedValue({ status: "ok" }) as ConnectedActionDeps["postAgentAnalyze"],
   fetchDashboard: vi.fn().mockResolvedValue({ status: "connected", data: { ok: true } }) as ConnectedActionDeps["fetchDashboard"],
   mapDashboard: vi.fn().mockReturnValue({ generatedAt: "refreshed" } as BackendSyncPayload),
   ...overrides,
@@ -283,6 +338,7 @@ describe("connected Store write orchestration", () => {
       payload: {},
     });
     expect(deps.fetchDashboard).toHaveBeenCalledOnce();
+    expect(deps.postAgentAnalyze).toHaveBeenCalledWith("E001");
     expect(actions).toEqual([{ type: "BACKEND_CONNECTED", payload: { generatedAt: "refreshed" } }]);
   });
 
@@ -294,6 +350,23 @@ describe("connected Store write orchestration", () => {
     await executeConnectedAction(connectedState(type === "COMPLETE_CARE_TASK" ? "in_progress" : "pending"), { type }, vi.fn(), { current: false }, deps);
     expect(deps.patchTask).toHaveBeenCalledWith("42", { status });
     expect(deps.fetchDashboard).toHaveBeenCalledOnce();
+    expect(deps.postAgentAnalyze).toHaveBeenCalledWith("E001");
+  });
+
+  it("keeps the successful business write and refreshed dashboard when Agent transport fails", async () => {
+    const deps = orchestrationDeps({
+      postAgentAnalyze: vi.fn().mockResolvedValue({ status: "error", error: { code: "network", message: "Agent 暂不可用" } }) as ConnectedActionDeps["postAgentAnalyze"],
+      mapDashboard: vi.fn().mockReturnValue({
+        generatedAt: "refreshed",
+        agentSummaries: { E001: { caregiverSummary: "stale" } },
+      } as unknown as BackendSyncPayload),
+    });
+    const actions: DemoAction[] = [];
+    await executeConnectedAction(connectedState(), { type: "TRIGGER_SOS" }, (action) => actions.push(action), { current: false }, deps);
+    expect(actions).toEqual([
+      { type: "BACKEND_CONNECTED", payload: { generatedAt: "refreshed", agentSummaries: {} } },
+      { type: "BACKEND_WRITE_FAILED", error: { code: "network", message: "Agent 暂不可用" } },
+    ]);
   });
 
   it("preserves server state and stops when the write fails", async () => {
@@ -303,6 +376,7 @@ describe("connected Store write orchestration", () => {
     const actions: DemoAction[] = [];
     await executeConnectedAction(connectedState(), { type: "TRIGGER_SOS" }, (a) => actions.push(a), { current: false }, deps);
     expect(deps.fetchDashboard).not.toHaveBeenCalled();
+    expect(deps.postAgentAnalyze).not.toHaveBeenCalled();
     expect(actions).toEqual([{ type: "BACKEND_WRITE_FAILED", error: { code: "network", message: "网络请求失败" } }]);
   });
 

@@ -16,6 +16,7 @@ import tasksRouter from "./routes/tasks.js";
 import eldersRouter from "./routes/elders.js";
 import dashboardRouter from "./routes/dashboard.js";
 import importRouter from "./routes/import.js";
+import { createAgentRouter } from "./routes/agent.js";
 
 function healthHandler(_req, res) {
   res.status(200).json({
@@ -48,7 +49,7 @@ export function errorHandler(err, _req, res, _next) {
   res.status(500).json({ ok: false, error: "internal_error" });
 }
 
-export function createApp() {
+export function createApp(options = {}) {
   const application = express();
   application.disable("x-powered-by");
 
@@ -75,6 +76,7 @@ export function createApp() {
   application.use("/api/elders", eldersRouter);
   application.use("/api/dashboard", dashboardRouter);
   application.use("/api/import", importRouter);
+  application.use("/api/agent", createAgentRouter({ agentOptions: options.agentOptions }));
   // Fallthrough for any other /api/* method/path -> JSON 404.
   application.use("/api", notFoundHandler);
   // Last resort for unexpected errors -> safe JSON 500.

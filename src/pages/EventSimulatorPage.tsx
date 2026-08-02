@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { MedicalDisclaimer } from "../components/MedicalDisclaimer";
 import {
   SIMULATOR_SCENARIOS,
@@ -19,10 +19,9 @@ export const EventSimulatorPage = () => {
   const [result, setResult] = useState<SimulatorApiResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [executedScenarioId, setExecutedScenarioId] = useState<SimulatorScenarioId | null>(null);
-  const agentStatus = useMemo(
-    () => agentExerciseStatus(executedScenarioId ?? scenarioId),
-    [executedScenarioId, scenarioId],
-  );
+  const agentStatus = result?.status === "ok"
+    ? result.data.agent_status
+    : agentExerciseStatus(executedScenarioId ?? scenarioId);
 
   const submitRequest = async (nextRequest: SimulatorEventRequest, executedId: SimulatorScenarioId) => {
     setRequest(nextRequest);

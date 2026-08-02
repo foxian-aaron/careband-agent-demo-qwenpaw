@@ -9,5 +9,7 @@
 | 第一次非法 | 同一 Provider 修复一次 | attempts=2，保留 request IDs |
 | 第二次失败/超时 | 安全 Mock fallback | requested=qwenpaw，actual=mock，fallback=true，failure_reason |
 | Agent 改风险字段 | 拒绝并修复/fallback | 后端风险保持不变 |
+| Agent API 网络/HTTP 失败 | 保留已经成功的事件/任务/风险并刷新 Dashboard | 页面显示安全错误，不伪造 Agent 成功 |
+| Dashboard Agent 行与当前风险不匹配 | 丢弃该摘要并显示确定性 Mock | `尚无有效服务端 Agent 输出` |
 
 不得静默切换模型，也不得显示错误正文、Token、路径或原始健康资料。
