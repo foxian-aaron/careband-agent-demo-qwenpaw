@@ -1,5 +1,7 @@
 # 01_FEATURE_MATRIX — 能力矩阵（25 项）
 
+> 本表冻结的是 Phase 0C 初始差距基线，不代表当前实现状态。当前实现与剩余缺口以 `docs/evidence-matrix.md` 和 `docs/rebuild/CURRENT_STATE.md` 为准。
+
 > 状态：`已有` / `部分具备` / `缺失` / `本轮排除`
 > 策略：`保留` / `改造` / `重写` / `仅参考` / `排除`
 > 优先级：`S` / `A` / `B` / `C`
@@ -22,7 +24,7 @@
 | 14 | JSON Schema + 验证 | 不存在 | `backend/src/schemas/agent_output.schema.json`、`backend/src/agent/agentOutputValidator.js`、`.agents/skills/agent-json-summary-validator/references/agent_output.schema.json` | 缺失 | 重写 | S | 无 |
 | 15 | 安全 fallback | 不存在 | `docs/careband/fallback_matrix.md`；一次修复→显式 Mock；fallback trace 记录 requested_provider/actual_provider/fallback_used/failure_reason | 缺失 | 重写 | S | #14 |
 | 16 | CSV 日聚合 | 不存在 | `backend/src/importers/csvImporter.js`、`backend/src/routes/import.js`、`backend/examples/daily_snapshots_sample.csv`、`src/lib/wearableImport.ts` | 缺失 | 重写 | A | #6 |
-| 17 | Apple Health 导入 | 不存在 | `backend/src/importers/appleHealthXml.js`、`backend/scripts/deriveAppleHealthCsv.js`、`backend/scripts/previewAppleHealth.js`、`docs/privacy_apple_health.md` | 缺失 | 重写 | B | #16 |
+| 17 | Apple Health 导入 | 不存在 | `backend/src/importers/appleHealthXml.js`、`backend/scripts/deriveAppleHealthCsv.js`、`backend/scripts/previewAppleHealth.js`、`docs/privacy-apple-health.md` | 缺失 | 重写 | B | #16 |
 | 18 | 记忆确认 | 不存在 | 用户确认 / 拒绝 Agent 建议 | 缺失 | 重写 | A | #10,#11 |
 | 19 | 语音文字模拟 | 已有 `voice_symptom`、DemoControl 语音事件、风险和摘要基础 | 文字模拟替代真实 ASR/TTS；原始文字仅当前页面会话，持久化仅限长摘要、结构化 Signal、pending 记忆草稿 | 部分具备 | 改造 | A | #1 |
 | 20 | 隐私授权 | 已有 `mockConsent` 与 `ConsentStatusCard` | 授权页 + 同意流程 | 部分具备 | 改造 | A | #1 |

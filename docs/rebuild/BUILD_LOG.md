@@ -1,27 +1,23 @@
 # BUILD_LOG — 构建与阶段日志
 
-> 区分 **历史仓库事实**（可追溯提交/CI 记录）、**本轮实测**（本阶段实际执行的命令与结果）、**未完成项**（明确标注）。
+> 区分 **历史仓库事实**（可追溯提交/CI 记录）、**本轮实测**（本阶段实际执行的命令与结果）、**未完成项**（明确标注）。旧记录只追加、不覆盖。
 
 ---
 
-## 1. 历史仓库事实
+## 1. 早期历史仓库事实
 
-| 阶段 | 结果 | 说明 |
+| 阶段 | 当时结果 | 说明 |
 |---|---|---|
 | Phase 0C | PASS | 双仓库只读审计与 25 项差距矩阵；无产品文件创建、无测试或构建 |
-| Phase 4 (R2C) | PASS | **一次格式修复后通过**（R2C = Review Round 2 Correction） |
+| Phase 4 (R2C) | PASS | 一次格式修复后通过（R2C = Review Round 2 Correction） |
 | Phase 5 | PASS_WITH_RECORDED_INTERVENTION | 见下方干预记录 |
-| Stage 1 | 治理文件已完成，等待 Codex 最终放行与 Git/PR | 仅创建治理文档；QwenPaw 不运行测试/构建，Worker 在 Node 22 上的验证**已通过**；未 Commit/Push/PR/Merge |
-
----
+| Stage 1 | 治理文件完成 | 当时等待 Codex 最终放行与 Git/PR；后来已通过 PR 合并 |
 
 ## 2. Phase 4 — R2C PASS
 
 - **问题**：Codex 审查发现格式问题。
 - **修复**：一次格式修复。
 - **结果**：PASS。
-
----
 
 ## 3. Phase 5 — PASS_WITH_RECORDED_INTERVENTION
 
@@ -33,71 +29,97 @@
 | Phase 5 执行中 | Codex（审查者） | 精确删除 `PHASE5_0D_TODO.md` | 记录的干预 |
 | Phase 5 执行中 | Codex | SSE 结束帧从客户端历史恢复 | 数据恢复 |
 
-### 3.2 实测环境
+### 3.2 实测环境与结果
 
-- Node v22.23.1 / npm 10.9.8
-- `npm ci` 安装
-- 6 个测试文件、31 项测试，项目文件变化为 0
+- Node v22.23.1 / npm 10.9.8。
+- `npm ci` 安装成功。
+- 6 个测试文件、31 项测试全部通过，构建成功，项目文件变化为 0。
 
-### 3.3 最终结果
+## 4. Stage 1 — 治理
 
-| 检查项 | 结果 |
-|---|---|
-| 测试 | 31 项全部通过 |
-| 构建 | 构建成功 |
-
----
-
-## 4. Stage 1（当前）
-
-- **范围**：仅创建 9 个治理规则文件（见 `CURRENT_STATE.md` §5）。
-- **测试 / 构建边界**：**QwenPaw 本轮不运行任何测试或构建**。治理文档经审查后，由 Deterministic Worker 在 **Node 22** 环境独立运行既有测试与 build，Codex 审查。
-- **治理文件创建**：本日志记录文件创建动作。
-
-### 4.0 Worker 验证结果（Stage 1）
+### 4.1 Worker 验证结果（当时）
 
 | 项目 | 结果 |
 |---|---|
 | 运行环境 | Node v22.23.1 / npm 10.9.8 |
 | 安装 | `npm ci` 成功 |
-| 测试 | 6 个测试文件、31 项测试**全部通过** |
+| 测试 | 6 个测试文件、31 项测试全部通过 |
 | 构建 | `npm run build` 成功 |
 | `package-lock.json` | 哈希与 main 基线一致，未被修改 |
-| Git 范围 | 仍为合同允许的 **9 个未跟踪治理文件**；`dist`、`node_modules`、`tsconfig.tsbuildinfo` 均为已忽略产物 |
-| 依赖漏洞（`npm ci` audit 摘要） | 共 **6 个**：3 moderate、2 high、1 critical；**本轮未执行 `npm audit fix`**（更未执行 `--force`），避免未经审查改变依赖或锁文件；登记为后续安全审计项 |
+| Git 范围 | 合同允许的 9 个治理文件；构建产物均已忽略 |
+| 依赖漏洞（当时 `npm ci` audit 摘要） | 3 moderate、2 high、1 critical；未执行 `npm audit fix` 或 `--force`，登记为待复核安全债务 |
 
-> **状态**：Worker 验证已通过，但本轮**未执行** Commit、Push、PR 或 Merge。Stage 1 状态为"治理文件已完成，等待 Codex 最终放行与 Git/PR 阶段"，**尚未合并**。
-
-### 4.1 Stage 1 干预记录
+### 4.2 Stage 1 干预记录
 
 | 时间 | 角色 | 事件 | 性质 |
 |---|---|---|---|
-| Stage 1 Repair 1 | QwenPaw（Builder） | 误创建未跟踪文件 `REPAIR1_TODO.md`（越权） | 第二次同类"擅自创建 TODO"能力问题 |
-| Stage 1 Repair 1 | Codex / Deterministic Worker | 核对精确路径后仅删除 `REPAIR1_TODO.md` | 记录的干预 |
-| 删除后 | — | 范围恢复为合同允许的 9 个文件 | 范围恢复 |
-| Stage 1 Repair 2 | QwenPaw（Builder） | 最终可见回复在合法 JSON 之前加了一句自然语言，违反 raw JSON-only 返回约束 | 能力问题：结构化输出不稳定 |
-| Stage 1 Repair 2 | 控制器 | 以持久化 Chat 记录与真实 Git diff 为准核实：真实文件修复有效 | 记录的核实 |
+| Repair 1 | QwenPaw（Builder） | 误创建 `REPAIR1_TODO.md` | 第二次同类越权 TODO |
+| Repair 1 | Codex / Worker | 核对精确路径后仅删除该文件 | 记录的干预 |
+| Repair 2 | QwenPaw（Builder） | 合法 JSON 前加入自然语言，违反 raw JSON-only | 结构化输出不稳定 |
+| Repair 2 | Controller / Codex | 以持久化 Chat 和真实 Git diff 核验修复 | 记录的核实 |
 
-> **教训（擅自创建 TODO）**：这是继 Phase 5 `PHASE5_0D_TODO.md` 之后第二次同类"擅自创建 TODO"能力问题。后续阶段合同应**继续禁止** QwenPaw 创建任何 TODO / scratch / 临时 / 日志文件（合同逐字列出准确路径者除外）。
->
-> **教训（结构化输出）**：Stage 1 Repair 2 表明 Builder 的 raw JSON-only 输出不稳定——真实文件修复有效，但最终回复仍混入自然语言。后续控制器**必须以持久化 Chat 记录与真实 Git diff 为准**，不得仅凭单次结构化输出判定结果。
+教训：后续合同继续禁止未明确列出的 TODO、scratch、临时和日志文件；控制器必须以持久化 Chat、真实 diff 和独立测试为准，不能只相信 Builder 自报 JSON。
 
----
+## 5. Stage 2–15 实施摘要
 
-## 5. 未完成项
+| Stage | 可追溯提交 | 能力 | 状态 |
+|---|---|---|---|
+| 2 | `51d06bd` | 最小 Express 后端骨架 | 已通过 PR 合并 |
+| 3 | `7a1604f` | SQLite 基础、迁移和种子数据 | 已通过 PR 合并 |
+| 4 | `2a2bacd` | 服务端六级风险引擎 | 已通过 PR 合并 |
+| 5 | `570a13d` | Canonical Event 与任务闭环 | 已通过 PR 合并 |
+| 6A | `7130402` | Dashboard 只读 API | 已通过 PR 合并 |
+| 6B | `a670099`、`657f735` | 前端后端只读同步及审查修复 | 已通过 PR 合并 |
+| 6C | `aa57cb6` | connected 写入与任务闭环 | 已通过 PR 合并 |
+| 7A | `f1ebb0d` | GLM-5.2 摘要 Agent 协议 | 已通过 PR 合并 |
+| 7B | `ceb71e1` | QwenPaw SSE Provider | 已通过 PR 合并 |
+| 8 | `b6ebf02` | Agent Schema、一次修复和显式 fallback | 已通过 PR 合并 |
+| 9A | `d8dc511` | CSV 后端 preview/confirm/history | 已通过 PR 合并 |
+| 9B | `f09b0a3` | TEST001 CSV 导入前端 | 已通过 PR 合并 |
+| 10 | `1629b45` | Apple Health 本地日聚合 | 已通过 PR 合并 |
+| 11 | `8b68216` | 记忆初始化与人工确认 | 本地堆叠提交，未 Push |
+| 12 | `63da28d` | 隐私安全的语音文字模拟 | 本地堆叠提交，未 Push |
+| 13 | `4129769` | 隐私、授权与家属门槛 | 本地堆叠提交，未 Push |
+| 14 | `bc88d19` | 软件事件模拟器 | 本地堆叠提交，未 Push |
+| 15 | `53c2f20` | Backend Contract 与 Pilot Plan | 本地堆叠提交，未 Push |
+
+各阶段 QwenPaw 表现、Codex 精确修复和阻塞详情保存在本机外部 `PHASE-*.md`；这些原始运行日志不提交到公开产品仓库。上表只登记可复核提交与范围，不把历史参考仓库结果当成本轮实测。
+
+## 6. Stage 16 — CI、安全扫描与三轮证据
+
+提交：`e5980f4`（本地，未 Push）。
+
+| Stage 16 门禁 | 结果 |
+|---|---|
+| 前端 | 18 files / 188 PASS |
+| 后端 | 214 PASS |
+| verification guards | 4/4 PASS |
+| repository boundary scanner | 180 files / PASS |
+| three-run | 3/3 PASS |
+| TypeScript/build | PASS |
+| 双重 Review | S=0, A=0, B=0, C=0 |
+
+三轮明确使用显式 Mock，`real_qwenpaw_runtime_called=false`。一次全局 npm dry-run 意外使用 Node 24，不计正式验证，也未修改项目。QwenPaw Stage 16 精确修复 Chat 超时且无改动；Codex 按授权完成最小修复，并在外部 `PHASE-16.md` 登记。
+
+## 7. Stage 17 — 文档封版候选
+
+- 仅整理当前能力、运行模式、隐私边界、Demo Runbook 和证据矩阵，并修复开发服务器误绑定 `0.0.0.0` 的安全问题。
+- Stage 16 的完整门禁在 Node v22.23.1 下再次通过：前端 188、后端 214、guards 4/4、scanner 180 files、three-run 3/3、TypeScript/build PASS。
+- 文档明确：公共事件 API 尚未调用 Agent Service，页面摘要仍是 Mock；真实 GLM-5.2 尚待公共编排和 smoke。
+- QwenPaw 仅完成短边界确认；具体文档整理与审查修复由 Codex 按授权完成，并记录在本机外部 `PHASE-17.md`。
+
+## 8. 当前未完成项与安全债务
 
 | 项目 | 说明 |
 |---|---|
-| Stage 2 后端骨架 | 尚未开始 |
-| 六级规则引擎实现 | 尚未开始 |
-| Agent GLM-5.2 适配 | 尚未开始 |
-| 测试套件 | 待 QwenPaw 按后续阶段合同编写 |
-| 依赖漏洞安全审计 | `npm ci` 报告 6 个漏洞（3 moderate、2 high、1 critical）；**待后续审查**，**不得**自动执行 `npm audit fix --force` |
+| 公共 Agent 编排 | 尚未闭合 `POST /api/agent/analyze`（或等价服务端入口）与前端触发、持久化、trace |
+| 真实 GLM smoke | 尚未执行；Stage 16 三轮不是模型成功证据 |
+| 依赖漏洞复核 | Stage 1 的 `npm ci` 曾报告 3 moderate、2 high、1 critical；当前版本尚未重新运行并登记 `npm audit`，不得宣称已解决，也不得自动 `npm audit fix --force` |
+| Stage 11–17 GitHub 交付 | GitHub 登录恢复前不 Push/PR/Merge |
 
----
-
-## 6. 约束备忘
+## 9. 约束备忘
 
 - Node 24 不得用于正式验证。
-- 所有 Codex 干预必须在本文件或 PR 描述中记录。
+- 所有 Codex 干预必须在本文件、外部 `PHASE-*.md` 或 PR 描述中登记。
 - 禁止自动 Merge。
+- 永久排除 firmware、HardwareMode、真实设备、ASR/TTS、真实健康数据、精确位置与医疗诊断。
