@@ -1,6 +1,6 @@
 // src/lib/apiClient.ts — Stage 6B read-only dashboard fetch with static-preview
 // fallback. Except on GitHub Pages, explicit VITE_API_BASE_URL wins (trailing slash stripped so the
-// request is /api/dashboard, never //api/dashboard). On localhost/127.0.0.1/0.0.0.0
+// request is /api/dashboard, never //api/dashboard). On localhost/127.0.0.1
 // the base is same-origin "" and the Vite dev/preview /api proxy forwards to
 // http://127.0.0.1:3001. Any non-local host without an explicit base URL is a
 // static preview (no /api request made). Errors use short safe codes; response
@@ -14,8 +14,9 @@ export type FetchDashboardResult =
   | { status: "connected"; data: unknown }
   | { status: "mock"; error: BackendSyncError };
 
-const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
+const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1"]);
 const DEFAULT_TIMEOUT_MS = 6000;
+const AGENT_TIMEOUT_MS = 70_000;
 const safeEnv = (): Record<string, string | undefined> => {
   try {
     const env = (import.meta as unknown as { env?: Record<string, unknown> }).env;
@@ -217,6 +218,27 @@ export async function postEvent(
     return { status: "error", error: safeError("static_preview", "静态预览，无法写入") };
   }
   return safeJsonWrite("POST", `${baseUrl}/api/events`, body, options);
+}
+
+/**
+ * Ask the local backend to build an authoritative Agent input and persist the
+ * validated result. The client supplies identity/linkage only; risk/provider
+ * fields are deliberately impossible to pass through this helper.
+ */
+export async function postAgentAnalyze(
+  elderId: string,
+  options: WriteOptions & { sourceEventId?: number } = {},
+): Promise<WriteResult> {
+  const baseUrl = options.baseUrl !== undefined ? options.baseUrl : resolveBaseUrl();
+  if (baseUrl === null) {
+    return { status: "error", error: safeError("static_preview", "静态预览不会调用真实 Agent") };
+  }
+  const body: Record<string, unknown> = { elder_id: elderId };
+  if (options.sourceEventId !== undefined) body.source_event_id = options.sourceEventId;
+  return safeJsonWrite("POST", `${baseUrl}/api/agent/analyze`, body, {
+    ...options,
+    timeoutMs: options.timeoutMs ?? AGENT_TIMEOUT_MS,
+  });
 }
 
 /** PATCH /api/tasks/:id with a safe JSON body. Static preview never fetches. */

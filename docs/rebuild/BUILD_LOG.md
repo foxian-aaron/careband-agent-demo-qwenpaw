@@ -108,16 +108,23 @@
 - 文档明确：公共事件 API 尚未调用 Agent Service，页面摘要仍是 Mock；真实 GLM-5.2 尚待公共编排和 smoke。
 - QwenPaw 仅完成短边界确认；具体文档整理与审查修复由 Codex 按授权完成，并记录在本机外部 `PHASE-17.md`。
 
-## 8. 当前未完成项与安全债务
+## 8. Stage 18 — 运行时 Agent 闭环
+
+- 新增 `POST /api/agent/analyze`：仅接受长者 ID 与可选源事件 ID，服务端组装权威输入，严格输出与安全 trace 原子持久化。
+- connected Store 和软件事件模拟器在业务写入成功后显式调用 Agent；失败不会回滚事件/任务/风险，并明确显示错误或确定性 fallback。
+- 前端只接受四个规则锁定字段完全一致、免责声明固定、Provider/Model trace 合法的服务端摘要；家属摘要继续受日状态授权门禁保护。
+- Node v22.23.1 实测：前端 207/207、后端 219/219、guards 4/4、scanner 184 files、TypeScript/build PASS。
+- 真实 smoke：`actual_provider=qwenpaw`、`provider=zhipu-cn-codingplan`、`model=glm-5.2`、`fallback_used=false`、`validation_status=valid`、Chat ID `f86d8f91-f13a-4783-a757-6f65a37badd7`。
+- QwenPaw Builder Chat `78c56a13-a1b6-400a-9a9f-bca6750d9089` 空历史且无文件变化，216 秒后为节省 Token 安全停止；Codex 按用户授权完成精确实现并在外部 `PHASE-18.md` 登记。
+
+## 9. 当前未完成项与安全债务
 
 | 项目 | 说明 |
 |---|---|
-| 公共 Agent 编排 | 尚未闭合 `POST /api/agent/analyze`（或等价服务端入口）与前端触发、持久化、trace |
-| 真实 GLM smoke | 尚未执行；Stage 16 三轮不是模型成功证据 |
 | 依赖漏洞复核 | Stage 1 的 `npm ci` 曾报告 3 moderate、2 high、1 critical；当前版本尚未重新运行并登记 `npm audit`，不得宣称已解决，也不得自动 `npm audit fix --force` |
-| Stage 11–17 GitHub 交付 | GitHub 登录恢复前不 Push/PR/Merge |
+| Stage 11–18 GitHub 交付 | GitHub 登录恢复前不 Push/PR/Merge |
 
-## 9. 约束备忘
+## 10. 约束备忘
 
 - Node 24 不得用于正式验证。
 - 所有 Codex 干预必须在本文件、外部 `PHASE-*.md` 或 PR 描述中登记。

@@ -8,6 +8,7 @@ import {
 } from "../lib/institutionMetrics";
 import {
   getActiveTaskForElder,
+  getAgentSummariesForElder,
   getEventsForElder,
   getRiskForElder,
   getTaskForElder,
@@ -108,6 +109,11 @@ export const InstitutionPage = () => {
     (row) => row.risk.riskLevel === "data_insufficient",
   ).length;
   const institutionSummary = `今天曾有 ${metrics.todayEverHighRiskCount} 位长者触发高风险或紧急状态，其中 ${metrics.currentOpenHighRiskCount} 位仍未闭环，${metrics.followedUpHighRiskCount} 位已完成跟进。当前还有 ${metrics.pendingTaskCount} 个任务尚未接单。建议机构优先确认未闭环高风险个案，同时复盘已跟进个案的处理记录。`;
+  const topAgentElder = rows[0]?.profile ?? null;
+  const topAgentSummary = topAgentElder
+    ? getAgentSummariesForElder(state, topAgentElder.elderId)
+    : null;
+  const displayedInstitutionSummary = topAgentSummary?.institutionSummary ?? institutionSummary;
 
   return (
     <div className="page">
@@ -201,10 +207,11 @@ export const InstitutionPage = () => {
         </article>
         <article className="panel ai-summary-card">
           <div className="section-title">
-            <span>Mock AI 机构摘要</span>
-            <h2>今日管理建议</h2>
+            <span>{topAgentSummary?.agentSource === "qwenpaw" ? "QwenPaw / GLM-5.2 机构摘要" : "Mock AI 机构摘要"}</span>
+            <h2>{topAgentElder ? `重点个案摘要：${topAgentElder.name}` : "今日管理建议"}</h2>
           </div>
-          <p>{institutionSummary}</p>
+          <p>{displayedInstitutionSummary}</p>
+          {topAgentSummary?.warning ? <p role="status">{topAgentSummary.warning}</p> : null}
           <div className="risk-strip">
             {rows.slice(0, 3).map((row) => (
               <div key={row.profile.elderId}>

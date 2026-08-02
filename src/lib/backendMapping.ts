@@ -5,6 +5,7 @@
 // ignored). Raw payload strings, voice text and precise location are never restored.
 
 import type {
+  AgentRoleSummaries,
   BackendOperationalSummary,
   BackendSyncPayload,
   CareEvent,
@@ -57,6 +58,7 @@ const ALL_INSUFFICIENT: RiskDimensions = {
   vitals: "data_insufficient", activity: "data_insufficient", sleep: "data_insufficient",
   medication: "data_insufficient", safety: "data_insufficient",
 };
+const AGENT_DISCLAIMER = "本结果仅为照护风险提示，不构成医疗诊断。";
 
 // elder profile (server core fields + mock-only display supplement)
 const mapProfile = (elder: Obj, mock: Record<string, ElderProfile>): ElderProfile | null => {
@@ -243,6 +245,93 @@ const mapSummary = (raw: unknown): BackendOperationalSummary => {
   };
 };
 
+const sameStrings = (left: unknown, right: string[]): left is string[] =>
+  Array.isArray(left) &&
+  left.length === right.length &&
+  left.every((value, index) => typeof value === "string" && value === right[index]);
+
+/**
+ * Map only a strict, server-validated Agent output whose four rule-owned fields
+ * still match the current authoritative risk. A stale, forged or malformed
+ * Agent row is omitted without invalidating the rest of the dashboard.
+ */
+const mapAgentSummary = (
+  outputRaw: unknown,
+  runRaw: unknown,
+  elderId: string,
+  risk: RiskResult,
+): AgentRoleSummaries | null => {
+  if (!isObj(outputRaw) || !isObj(runRaw)) return null;
+  const outputCreatedAt = str(outputRaw.created_at);
+  const runCreatedAt = str(runRaw.created_at);
+  const allowedOutputKeys = new Set([
+    "agent_output_id", "elder_id", "created_at", "status_level", "risk_score",
+    "key_reasons", "recommended_action", "caregiver_summary", "family_summary",
+    "institution_summary", "safety_disclaimer",
+  ]);
+  if (Object.keys(outputRaw).some((key) => !allowedOutputKeys.has(key))) return null;
+  if (
+    outputRaw.elder_id !== elderId || runRaw.elder_id !== elderId ||
+    !outputCreatedAt || outputCreatedAt !== runCreatedAt
+  ) return null;
+  const caregiverSummary = str(outputRaw.caregiver_summary);
+  const familySummary = str(outputRaw.family_summary);
+  const institutionSummary = str(outputRaw.institution_summary);
+  if (!caregiverSummary || !familySummary || !institutionSummary) return null;
+  if (
+    outputRaw.status_level !== risk.riskLevel ||
+    outputRaw.risk_score !== risk.riskScore ||
+    !sameStrings(outputRaw.key_reasons, risk.keyReasons) ||
+    outputRaw.recommended_action !== risk.recommendedAction ||
+    outputRaw.safety_disclaimer !== AGENT_DISCLAIMER
+  ) return null;
+
+  const requestedProvider = str(runRaw.requested_provider);
+  const actualProvider = runRaw.actual_provider;
+  const provider = str(runRaw.provider);
+  const model = str(runRaw.model);
+  const validationStatus = runRaw.validation_status;
+  const fallbackUsed = runRaw.fallback_used;
+  if (
+    !requestedProvider || !model ||
+    (actualProvider !== "qwenpaw" && actualProvider !== "mock") ||
+    (validationStatus !== "valid" && validationStatus !== "fallback_valid") ||
+    typeof fallbackUsed !== "boolean"
+  ) return null;
+  if (actualProvider === "qwenpaw") {
+    if (provider !== "zhipu-cn-codingplan" || model !== "glm-5.2" || fallbackUsed || validationStatus !== "valid") return null;
+  } else if (
+    provider !== "deterministic-mock" || model !== "deterministic-mock-v0.3" ||
+    fallbackUsed !== (validationStatus === "fallback_valid")
+  ) return null;
+
+  const source = actualProvider as "qwenpaw" | "mock";
+  const sourceLabel = source === "qwenpaw" ? "QwenPaw / GLM-5.2" : "确定性 Mock";
+  const fallbackLabel = fallbackUsed ? "是（已显式降级）" : "否";
+  return {
+    caregiverSummary,
+    familySummary,
+    institutionSummary,
+    agentSource: source,
+    requestedProvider,
+    model,
+    validationStatus: validationStatus as "valid" | "fallback_valid",
+    fallbackUsed,
+    warning: fallbackUsed ? "QwenPaw 输出不可用，当前展示经过校验的确定性 Mock 摘要。" : undefined,
+    generatedAt: outputCreatedAt,
+    decisionTrace: [
+      `Agent 来源：${sourceLabel}`,
+      `请求 Provider：${requestedProvider}`,
+      `校验状态：${validationStatus}`,
+      `Fallback：${fallbackLabel}`,
+      `规则结论：${risk.riskLevel} / ${risk.riskScore}`,
+      `关键原因：${risk.keyReasons.join("；") || "无"}`,
+      `建议动作：${risk.recommendedAction}`,
+      AGENT_DISCLAIMER,
+    ],
+  };
+};
+
 // Only the four formal demo elders are accepted; others (E005, E999) are skipped
 // even when subject_kind === "elder".
 const ALLOWED_ELDERS = new Set(["E001", "E002", "E003", "E004"]);
@@ -269,6 +358,7 @@ export function mapDashboard(data: unknown, mockProfiles: Record<string, ElderPr
   const tasks: CareTask[] = [];
   const operationalStates: Record<string, OperationalState> = {};
   const riskMap: Record<string, RiskResult> = {};
+  const agentSummaries: Record<string, AgentRoleSummaries> = {};
 
   for (const rowRaw of arr(data.rows)) {
     if (!isObj(rowRaw) || !isObj(rowRaw.elder)) continue;
@@ -296,6 +386,8 @@ export function mapDashboard(data: unknown, mockProfiles: Record<string, ElderPr
     const elderTasks = arr(rowRaw.tasks).map((t, i) => mapTask(t, elderId, i)).filter((t): t is CareTask => t !== null);
     tasks.push(...elderTasks);
     operationalStates[elderId] = deriveState(elderTasks);
+    const agentSummary = mapAgentSummary(rowRaw.latest_agent_output, rowRaw.latest_agent_run, elderId, risk);
+    if (agentSummary) agentSummaries[elderId] = agentSummary;
   }
 
   if ([...ALLOWED_ELDERS].some((id) => !profiles[id])) {
@@ -303,7 +395,7 @@ export function mapDashboard(data: unknown, mockProfiles: Record<string, ElderPr
   }
 
   return {
-    generatedAt, profiles, snapshots, events, tasks, operationalStates, riskMap,
+    generatedAt, profiles, snapshots, events, tasks, operationalStates, riskMap, agentSummaries,
     operationalSummary: mapSummary(data.operational_summary),
   };
 }

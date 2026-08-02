@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fetchDashboard, resolveBaseUrl } from "../lib/apiClient";
 import { InvalidBackendPayloadError, mapDashboard } from "../lib/backendMapping";
 import { mockProfiles } from "../data/mockProfiles";
-import { createInitialDemoState, demoReducer, getRiskForElder, serializeForStorage } from "../store/demoStore";
+import { createInitialDemoState, demoReducer, getAgentSummariesForElder, getRiskForElder, serializeForStorage } from "../store/demoStore";
 import type { BackendSyncPayload, CareEvent, CareTask, DailySnapshot, ElderProfile, RiskResult } from "../types";
 
 // --- fixtures ---------------------------------------------------------------
@@ -69,7 +69,7 @@ describe("apiClient", () => {
     expect(resolveBaseUrl({ env: { VITE_API_BASE_URL: "http://example.com:8080/api/" }, hostname: "x" })).toBe("http://example.com:8080/api");
     expect(resolveBaseUrl({ env: {}, hostname: "localhost" })).toBe("");
     expect(resolveBaseUrl({ env: {}, hostname: "127.0.0.1" })).toBe("");
-    expect(resolveBaseUrl({ env: {}, hostname: "0.0.0.0" })).toBe("");
+    expect(resolveBaseUrl({ env: {}, hostname: "0.0.0.0" })).toBeNull();
     expect(resolveBaseUrl({ env: {}, hostname: "careband.example.com" })).toBeNull();
     expect(resolveBaseUrl({ env: { VITE_API_BASE_URL: "https://api.example" }, hostname: "foxian-aaron.github.io" })).toBeNull();
   });
@@ -147,6 +147,86 @@ describe("mapDashboard valid payload", () => {
     expect(task.elderId).toBe("E001"); expect(task.status).toBe("pending");
     expect(task.priority).toBe("urgent"); expect(task.reason).toContain("SOS 求助");
     expect(task.recommendedAction).toBe("立即处理");
+  });
+});
+
+describe("server Agent summary mapping", () => {
+  const withAgent = (patch: Record<string, unknown> = {}): unknown => {
+    const dashboard = validDashboard() as { rows: Array<Record<string, unknown>> };
+    const e1 = dashboard.rows[0];
+    const authoritative = e1.risk_result as Record<string, unknown>;
+    e1.latest_agent_output = {
+      agent_output_id: 11,
+      elder_id: "E001",
+      created_at: "2026-08-01T12:01:00.000Z",
+      status_level: authoritative.status_level,
+      risk_score: authoritative.risk_score,
+      key_reasons: authoritative.key_reasons,
+      recommended_action: authoritative.recommended_action,
+      caregiver_summary: "护工摘要",
+      family_summary: "家属摘要",
+      institution_summary: "机构摘要",
+      safety_disclaimer: "本结果仅为照护风险提示，不构成医疗诊断。",
+      ...patch,
+    };
+    e1.latest_agent_run = {
+      agent_run_id: 12,
+      elder_id: "E001",
+      created_at: "2026-08-01T12:01:00.000Z",
+      requested_provider: "qwenpaw",
+      actual_provider: "qwenpaw",
+      provider: "zhipu-cn-codingplan",
+      model: "glm-5.2",
+      fallback_used: false,
+      validation_status: "valid",
+    };
+    return dashboard;
+  };
+
+  it("accepts a strict GLM-5.2 output only when all four rule-owned fields match", () => {
+    const mapped = mapDashboard(withAgent(), mockProfilesRecord);
+    expect(mapped.agentSummaries?.E001).toMatchObject({
+      caregiverSummary: "护工摘要",
+      familySummary: "家属摘要",
+      institutionSummary: "机构摘要",
+      agentSource: "qwenpaw",
+      model: "glm-5.2",
+      fallbackUsed: false,
+    });
+    expect(mapped.agentSummaries?.E001.decisionTrace.join(" ")).toContain("规则结论：urgent / 100");
+    const state = demoReducer(base(), { type: "BACKEND_CONNECTED", payload: mapped });
+    expect(getAgentSummariesForElder(state, "E001").familySummary).toBe("家属摘要");
+  });
+
+  it.each([
+    ["status", { status_level: "stable" }],
+    ["score", { risk_score: 1 }],
+    ["reasons", { key_reasons: ["伪造原因"] }],
+    ["action", { recommended_action: "伪造动作" }],
+    ["disclaimer", { safety_disclaimer: "错误免责声明" }],
+    ["extra field", { diagnosis: "不应出现" }],
+  ])("omits a stale/invalid Agent row: %s", (_label, patch) => {
+    const mapped = mapDashboard(withAgent(patch), mockProfilesRecord);
+    expect(mapped.agentSummaries?.E001).toBeUndefined();
+  });
+
+  it("omits independently selected output/run rows when their persisted identities do not pair", () => {
+    const dashboard = withAgent() as { rows: Array<Record<string, unknown>> };
+    (dashboard.rows[0].latest_agent_run as Record<string, unknown>).created_at = "2026-08-01T12:02:00.000Z";
+    expect(mapDashboard(dashboard, mockProfilesRecord).agentSummaries?.E001).toBeUndefined();
+
+    const missingIdentity = withAgent() as { rows: Array<Record<string, unknown>> };
+    delete (missingIdentity.rows[0].latest_agent_output as Record<string, unknown>).created_at;
+    delete (missingIdentity.rows[0].latest_agent_run as Record<string, unknown>).created_at;
+    expect(mapDashboard(missingIdentity, mockProfilesRecord).agentSummaries?.E001).toBeUndefined();
+  });
+
+  it("uses an explicitly labelled deterministic fallback when no valid server output exists", () => {
+    const state = demoReducer(base(), { type: "BACKEND_CONNECTED", payload: mapDashboard(validDashboard(), mockProfilesRecord) });
+    const summary = getAgentSummariesForElder(state, "E001");
+    expect(summary.agentSource).toBe("mock");
+    expect(summary.fallbackUsed).toBe(true);
+    expect(summary.decisionTrace[0]).toContain("尚无有效服务端 Agent 输出");
   });
 });
 

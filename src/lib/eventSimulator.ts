@@ -97,11 +97,25 @@ export interface SimulatorTaskResult {
   recommended_action: string;
 }
 
+export interface SimulatorAgentStatus {
+  state: "qwenpaw_success" | "mock" | "fallback" | "error";
+  requested_provider: string | null;
+  actual_provider: "qwenpaw" | "mock" | null;
+  model: string | null;
+  fallback_used: boolean;
+  validation_status: "valid" | "fallback_valid" | null;
+  caregiver_summary?: string;
+  family_summary?: string;
+  institution_summary?: string;
+  error_code?: string;
+}
+
 export interface SimulatorTrace {
   http_status: number;
   event: SimulatorCanonicalEvent;
   risk_result: SimulatorRiskResult;
   task: SimulatorTaskResult | null;
+  agent_status: SimulatorAgentStatus;
 }
 
 export type SimulatorApiResult =
@@ -112,7 +126,10 @@ export interface SimulatorRequestOptions {
   baseUrl?: string | null;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
+  agentTimeoutMs?: number;
 }
+
+const AGENT_TIMEOUT_MS = 70_000;
 
 const RISK_LEVELS = new Set<RiskLevel>([
   "data_insufficient", "stable", "observation", "attention", "high_risk", "urgent",
@@ -154,7 +171,7 @@ const isLoopbackBaseUrl = (baseUrl: string): boolean => {
     const parsed = new URL(baseUrl);
     return (
       ["http:", "https:"].includes(parsed.protocol) &&
-      ["localhost", "127.0.0.1", "0.0.0.0"].includes(parsed.hostname.toLowerCase()) &&
+      ["localhost", "127.0.0.1"].includes(parsed.hostname.toLowerCase()) &&
       parsed.username === "" && parsed.password === "" && parsed.pathname.replace(/\/+$/, "") === ""
     );
   } catch {
@@ -180,7 +197,7 @@ function parseTrace(
   body: unknown,
   httpStatus: number,
   request: SimulatorEventRequest,
-): SimulatorTrace | null {
+): Omit<SimulatorTrace, "agent_status"> | null {
   if (!isRecord(body) || body.ok !== true || !isRecord(body.event) || !isRecord(body.risk_result)) return null;
   const event = body.event;
   const risk = body.risk_result;
@@ -232,6 +249,89 @@ function parseTrace(
   };
 }
 
+const agentError = (code: string): SimulatorAgentStatus => ({
+  state: "error",
+  requested_provider: "qwenpaw",
+  actual_provider: null,
+  model: null,
+  fallback_used: false,
+  validation_status: null,
+  error_code: code,
+});
+
+const parseAgentStatus = (
+  body: unknown,
+  risk: SimulatorRiskResult,
+): SimulatorAgentStatus | null => {
+  if (!isRecord(body) || body.ok !== true || !isRecord(body.meta) || !isRecord(body.agent_result)) return null;
+  const meta = body.meta;
+  const output = body.agent_result;
+  const outputKeys = Object.keys(output).sort();
+  const expectedKeys = [
+    "caregiver_summary", "family_summary", "institution_summary", "key_reasons",
+    "recommended_action", "risk_score", "safety_disclaimer", "status_level",
+  ].sort();
+  if (!sameJson(outputKeys, expectedKeys)) return null;
+  if (
+    output.status_level !== risk.status_level || output.risk_score !== risk.risk_score ||
+    !sameJson(output.key_reasons, risk.key_reasons) || output.recommended_action !== risk.recommended_action ||
+    output.safety_disclaimer !== DISCLAIMER || !nonEmpty(output.caregiver_summary) ||
+    !nonEmpty(output.family_summary) || !nonEmpty(output.institution_summary)
+  ) return null;
+  const actual = meta.actual_provider;
+  const validation = meta.validation_status;
+  if (
+    (actual !== "qwenpaw" && actual !== "mock") ||
+    (validation !== "valid" && validation !== "fallback_valid") ||
+    typeof meta.fallback_used !== "boolean" || !nonEmpty(meta.requested_provider) || !nonEmpty(meta.model)
+  ) return null;
+  if (actual === "qwenpaw" && (meta.model !== "glm-5.2" || meta.provider !== "zhipu-cn-codingplan" || meta.fallback_used || validation !== "valid")) return null;
+  if (actual === "mock" && (meta.provider !== "deterministic-mock" || meta.model !== "deterministic-mock-v0.3" || meta.fallback_used !== (validation === "fallback_valid"))) return null;
+  return {
+    state: actual === "qwenpaw" ? "qwenpaw_success" : meta.fallback_used ? "fallback" : "mock",
+    requested_provider: meta.requested_provider,
+    actual_provider: actual,
+    model: meta.model,
+    fallback_used: meta.fallback_used,
+    validation_status: validation,
+    caregiver_summary: output.caregiver_summary,
+    family_summary: output.family_summary,
+    institution_summary: output.institution_summary,
+  };
+};
+
+const submitAgentForTrace = async (
+  trace: Omit<SimulatorTrace, "agent_status">,
+  baseUrl: string,
+  options: SimulatorRequestOptions,
+): Promise<SimulatorAgentStatus> => {
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeoutMs = options.agentTimeoutMs ?? AGENT_TIMEOUT_MS;
+  const timer = controller && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  let response: Response;
+  try {
+    response = await (options.fetchImpl ?? fetch)(`${baseUrl}/api/agent/analyze`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ elder_id: trace.event.elder_id, source_event_id: trace.event.event_id }),
+      signal: controller?.signal,
+    });
+  } catch (error) {
+    return agentError(controller && error instanceof Error && error.name === "AbortError" ? "timeout" : "network");
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  if (!response.ok) return agentError("http_error");
+  if (!(response.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) return agentError("bad_content_type");
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return agentError("bad_json");
+  }
+  return parseAgentStatus(body, trace.risk_result) ?? agentError("invalid_payload");
+};
+
 export async function submitSimulatorEvent(
   request: SimulatorEventRequest,
   options: SimulatorRequestOptions = {},
@@ -278,9 +378,13 @@ export async function submitSimulatorEvent(
     return { status: "error", http_status: response.status, error: safeError("bad_json", "后端 JSON 无法解析") };
   }
   const trace = parseTrace(body, response.status, request);
-  return trace
-    ? { status: "ok", data: trace }
-    : { status: "error", http_status: response.status, error: safeError("invalid_payload", "后端响应不符合事件契约") };
+  if (!trace) {
+    return { status: "error", http_status: response.status, error: safeError("invalid_payload", "后端响应不符合事件契约") };
+  }
+  const agentStatus = request.payload.simulation === "agent_failure"
+    ? agentError("failure_exercise")
+    : await submitAgentForTrace(trace, baseUrl, options);
+  return { status: "ok", data: { ...trace, agent_status: agentStatus } };
 }
 
 export function agentExerciseStatus(scenarioId: SimulatorScenarioId) {

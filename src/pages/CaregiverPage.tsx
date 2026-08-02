@@ -7,6 +7,7 @@ import { deriveCareLoopStatus, deriveDisplayStatus } from "../lib/displayStatus"
 import {
   getEventsForElder,
   getActiveTaskForElder,
+  getAgentSummariesForElder,
   getRiskForElder,
   useDemo,
 } from "../store/demoStore";
@@ -35,6 +36,11 @@ export const CaregiverPage = () => {
       event.eventType,
     ),
   );
+  const summaryElderId = tasks[0]?.elderId ?? highRiskProfiles[0]?.elderId ?? profiles[0]?.elderId;
+  const caregiverSummary = summaryElderId
+    ? getAgentSummariesForElder(state, summaryElderId)
+    : null;
+  const summaryProfile = summaryElderId ? state.profiles[summaryElderId] : null;
 
   return (
     <div className="page">
@@ -136,6 +142,17 @@ export const CaregiverPage = () => {
           </div>
         </article>
       </section>
+
+      {caregiverSummary && summaryProfile ? (
+        <section className="panel ai-summary-card">
+          <div className="section-title">
+            <span>{caregiverSummary.agentSource === "qwenpaw" ? "QwenPaw / GLM-5.2 护工摘要" : "Mock AI 护工摘要"}</span>
+            <h2>{summaryProfile.name} 照护摘要</h2>
+          </div>
+          <p>{caregiverSummary.caregiverSummary}</p>
+          {caregiverSummary.warning ? <p role="status">{caregiverSummary.warning}</p> : null}
+        </section>
+      ) : null}
 
       <section className="panel">
         <div className="section-title">

@@ -223,6 +223,13 @@ export interface AgentRoleSummaries {
   familySummary: string;
   institutionSummary: string;
   decisionTrace: string[];
+  agentSource?: "qwenpaw" | "mock";
+  requestedProvider?: string;
+  model?: string;
+  validationStatus?: "valid" | "fallback_valid";
+  fallbackUsed?: boolean;
+  warning?: string;
+  generatedAt?: string;
 }
 
 export interface TrendPoint {
@@ -368,5 +375,6 @@ export interface BackendSyncPayload {
   tasks: CareTask[];
   operationalStates: Record<string, OperationalState>;
   riskMap: Record<string, RiskResult>;
+  agentSummaries?: Record<string, AgentRoleSummaries>;
   operationalSummary: BackendOperationalSummary;
 }

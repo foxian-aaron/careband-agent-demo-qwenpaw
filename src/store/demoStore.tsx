@@ -22,7 +22,7 @@ import { mockProfiles } from "../data/mockProfiles";
 import { mockSnapshots } from "../data/mockSnapshots";
 import { mockTrends } from "../data/mockTrends";
 import { generateAgentSummaries } from "../lib/agentFormatter";
-import { fetchDashboard, patchTask, postEvent } from "../lib/apiClient";
+import { fetchDashboard, patchTask, postAgentAnalyze, postEvent } from "../lib/apiClient";
 import { mapDashboard } from "../lib/backendMapping";
 import { deriveCareLoopStatus, deriveDisplayStatus } from "../lib/displayStatus";
 import {
@@ -321,6 +321,7 @@ const hydrateFromBackend = (
 export interface ConnectedActionDeps {
   postEvent: typeof postEvent;
   patchTask: typeof patchTask;
+  postAgentAnalyze: typeof postAgentAnalyze;
   fetchDashboard: typeof fetchDashboard;
   mapDashboard: (data: unknown) => BackendSyncPayload;
 }
@@ -328,6 +329,7 @@ export interface ConnectedActionDeps {
 const connectedDeps: ConnectedActionDeps = {
   postEvent,
   patchTask,
+  postAgentAnalyze,
   fetchDashboard,
   mapDashboard: (data) => mapDashboard(data, mockProfilesRecord),
 };
@@ -374,13 +376,27 @@ export const executeConnectedAction = async (
       dispatch({ type: "BACKEND_WRITE_FAILED", error: result.error });
       return true;
     }
+    // The business write is already authoritative. Agent failure must never
+    // roll it back or hide the refreshed risk/task state.
+    const agentResult = await deps.postAgentAnalyze(chenId);
     const refreshed = await deps.fetchDashboard();
     if (refreshed.status === "mock") {
       dispatch({ type: "BACKEND_WRITE_FAILED", error: refreshed.error });
       return true;
     }
     try {
-      dispatch({ type: "BACKEND_CONNECTED", payload: deps.mapDashboard(refreshed.data) });
+      const mapped = deps.mapDashboard(refreshed.data);
+      const payload = agentResult.status === "error" && mapped.agentSummaries?.[chenId]
+        ? (() => {
+            const agentSummaries = { ...mapped.agentSummaries };
+            delete agentSummaries[chenId];
+            return { ...mapped, agentSummaries };
+          })()
+        : mapped;
+      dispatch({ type: "BACKEND_CONNECTED", payload });
+      if (agentResult.status === "error") {
+        dispatch({ type: "BACKEND_WRITE_FAILED", error: agentResult.error });
+      }
     } catch {
       dispatch(writeFailure("invalid_payload", "服务端刷新结果无效，请稍后重试"));
     }
@@ -1044,12 +1060,16 @@ export const getAgentSummariesForElder = (
   state: DemoState,
   elderId: string,
 ): AgentRoleSummaries => {
+  if (state.backend.mode === "backend") {
+    const serverSummary = state.serverData?.agentSummaries?.[elderId];
+    if (serverSummary) return serverSummary;
+  }
   const events = getEventsForElder(state, elderId);
   const risk = getRiskForElder(state, elderId);
   const careLoopStatus = deriveCareLoopStatus(elderId, state.tasks, events);
   const displayStatus = deriveDisplayStatus(risk, careLoopStatus);
 
-  return generateAgentSummaries(
+  const localSummary = generateAgentSummaries(
     state.profiles[elderId],
     state.baselines[elderId],
     state.snapshots[elderId],
@@ -1058,6 +1078,24 @@ export const getAgentSummariesForElder = (
     careLoopStatus,
     displayStatus,
   );
+  const missingServerOutput = state.backend.mode === "backend";
+  return {
+    ...localSummary,
+    agentSource: "mock",
+    requestedProvider: missingServerOutput ? "qwenpaw" : "mock",
+    model: "deterministic-mock-v0.3",
+    validationStatus: missingServerOutput ? "fallback_valid" : "valid",
+    fallbackUsed: missingServerOutput,
+    warning: missingServerOutput
+      ? "尚无与当前规则结果匹配的有效服务端 Agent 输出，当前展示确定性 Mock 摘要。"
+      : undefined,
+    decisionTrace: [
+      missingServerOutput
+        ? "Agent 来源：确定性 Mock（尚无有效服务端 Agent 输出）"
+        : "Agent 来源：本地确定性 Mock",
+      ...localSummary.decisionTrace,
+    ],
+  };
 };
 
 /**
