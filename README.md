@@ -50,7 +50,9 @@ npm run build
 
 Stage 16 的真实本地结果：前端 188/188、后端 214/214、verification guards 4/4、repository boundary scanner 扫描 180 个文件并通过、三轮门禁 3/3、TypeScript 与生产构建通过。三轮 Agent 证据是**显式 Mock、非 fallback**，并记录 `real_qwenpaw_runtime_called=false`，不能当作真实 GLM-5.2 成功证据。
 
-Stage 18 运行时闭环结果：前端 207/207、后端 219/219、verification guards 4/4、repository boundary scanner 扫描 184 个文件并通过、TypeScript/生产构建通过；单独真实 smoke 得到 `actual_provider=qwenpaw`、`model=glm-5.2`、`fallback_used=false`、`validation_status=valid`。该 smoke 与 Stage 16 的显式 Mock 三轮证据分开记录。
+Stage 18 运行时闭环结果：前端 207/207、后端 219/219、verification guards 4/4、repository boundary scanner 扫描 184 个文件并通过、TypeScript/生产构建通过；单独真实 smoke 得到 `actual_provider=qwenpaw`、`model=glm-5.2`、`fallback_used=false`、`validation_status=valid`。该 smoke 与 Stage 16 的显式 Mock 三轮证据分开记录。Stage 18 已正式闭环，PR #29–#36 已合并。
+
+Stage 19 收尾升级前端构建工具链至 Vite `8.2.0`、Vitest `4.1.10`、`@vitejs/plugin-react` `5.2.0`，并将 `tsconfig.json` 的 `moduleResolution` 从 `Node` 改为 `Bundler` 以匹配 Vite 8；本轮门禁（repository / verification / 前端 207 / 后端 219 / three-run 3/3 / build）全部通过，根与 backend `npm audit --audit-level=high` 均 0 漏洞。三轮 Agent 证据仍是**显式 Mock**，真实 GLM-5.2 仍仅为 Stage 18 单次 smoke。GitHub Pages 已启用 GitHub Actions 发布模式，静态 Mock 预览首次部署已通过（run `30731249957`）。
 
 ## 主要页面
 

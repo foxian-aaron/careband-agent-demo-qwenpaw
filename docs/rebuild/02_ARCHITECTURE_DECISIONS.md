@@ -42,7 +42,7 @@
 
 - **决定**：Agent 摘要固定使用 GLM-5.2；通过 `qwenpawProvider.js` 建立模型无关 SSE 桥。传输桥在技术上**模型无关**，但**本项目当前运行时模型固定为 GLM-5.2**；任何未来模型切换**必须新建一条架构决策记录**，不得自动切换或静默切换。
 - **理由**：固定模型保证可复现性；SSE 桥隔离模型差异，保留未来切换能力（但切换须经显式决策，不得静默发生）。
-- **后果**：Provider 与 Agent Service 已按 GLM-5.2 合同实现；公共事件到 Agent 的自动编排仍是候选版缺口。
+- **后果**：Provider 与 Agent Service 已按 GLM-5.2 合同实现；Stage 18 已通过 `POST /api/agent/analyze` 闭合服务端 Agent 编排——业务写入成功后由服务端组装权威输入并调用 Agent，输出经严格 JSON Schema 校验，失败显式 Mock fallback、不回滚业务写入。公共事件到 Agent 的编排不再是候选缺口，但严格验证/fallback 边界继续保留。
 
 ---
 
@@ -86,6 +86,14 @@
 
 ---
 
+## ADR-11：Vite 8 构建工具链与 moduleResolution=Bundler
+
+- **决定**：Stage 19 将前端构建工具链固定为 Vite `8.2.0` + Vitest `4.1.10` + `@vitejs/plugin-react` `5.2.0`，并把 `tsconfig.json` 的 `compilerOptions.moduleResolution` 设为 `Bundler`。
+- **理由**：Vite 8 默认且推荐的模块解析策略为 Bundler；保留旧 `Node` 解析会导致构建失败。Bundler 解析与 Vite 的依赖预打包、条件导出解析一致，并能正确服务于 React/JSX 入口。
+- **后果**：仅改 `moduleResolution` 一个字段，其余 `compilerOptions` 不变；ADR-05 固定的 GLM-5.2 运行时模型不受影响。三轮 Agent 证据仍为显式 Mock，真实 GLM-5.2 仍只有 Stage 18 单次 smoke。
+
+---
+
 ## 决策状态汇总
 
 | ADR | 标题 | 状态 |
@@ -100,3 +108,4 @@
 | 08 | 双运行模式 | Accepted |
 | 09 | 双仓库隔离 | Accepted |
 | 10 | 硬件永久排除 | Accepted |
+| 11 | Vite 8 工具链 + moduleResolution=Bundler | Accepted |
