@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "RUN-20260802-CB-STAGE16-THREE-RUNS-001",
+  "stage": "stage-16-ci-three-runs",
+  "base_sha": "53c2f20e4714ebbc0e90c455184482fb0159443e",
+  "node": "v22.23.1",
+  "qwenpaw": {
+    "version": "2.0.1",
+    "agent_id": "CnW5Bk",
+    "model": "glm-5.2",
+    "chat_id": "91bfdebe-f1b6-4a2d-b4c9-2fc8869ee861",
+    "chat_visible": true,
+    "role": "contract_boundary_confirmation"
+  },
+  "validation": {
+    "repository_boundary_scan": "pass",
+    "verification_guard_tests": "4/4 pass",
+    "frontend_tests": "188/188 pass",
+    "backend_tests": "214/214 pass",
+    "three_run_gate": "3/3 pass",
+    "typecheck": "pass",
+    "production_build": "pass",
+    "real_qwenpaw_runtime_called": false,
+    "agent_evidence": "explicit_mock_not_fallback"
+  },
+  "files": [
+    "README.md",
+    "three-runs.json"
+  ]
+}
