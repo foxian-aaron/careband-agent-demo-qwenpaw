@@ -3,6 +3,9 @@
   "version": "0.1.3",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0 <23"
+  },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "dev:frontend": "vite --host 0.0.0.0",
@@ -11,7 +14,11 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run src",
     "test:frontend": "vitest run src",
-    "test:backend": "node --test \"backend/tests/**/*.test.js\""
+    "test:backend": "node --test \"backend/tests/**/*.test.js\"",
+    "test:verification": "node --test \"scripts/tests/*.test.mjs\"",
+    "test:all": "npm run test:frontend && npm run test:backend",
+    "verify:repository": "node scripts/check-repository-boundaries.mjs",
+    "verify:three-runs": "node scripts/verify-three-runs.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

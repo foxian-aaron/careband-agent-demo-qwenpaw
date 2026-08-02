@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "run_id": "RUN-20260802-CB-STAGE16-THREE-RUNS-001",
+  "generated_at": "2026-08-02T00:41:14.728Z",
+  "node": "v22.23.1",
+  "mode": "deterministic_validation_harness",
+  "real_qwenpaw_runtime_called": false,
+  "runs": [
+    {
+      "run": 1,
+      "duration_ms": 135,
+      "csv": {
+        "previewed": 2,
+        "imported": 2,
+        "persisted_dates": 2,
+        "history_runs": 2
+      },
+      "sos": {
+        "source": "software_simulator",
+        "status_level": "urgent",
+        "task_created": true
+      },
+      "agent": {
+        "requested_provider": "mock",
+        "actual_provider": "mock",
+        "fallback_used": false,
+        "validation_status": "valid",
+        "real_qwenpaw_called": false
+      },
+      "closeout": {
+        "task_status": "resolved",
+        "active_events": 0,
+        "status_level": "data_insufficient",
+        "family_summary_present": true,
+        "institution_summary_present": true
+      }
+    },
+    {
+      "run": 2,
+      "duration_ms": 99,
+      "csv": {
+        "previewed": 2,
+        "imported": 2,
+        "persisted_dates": 2,
+        "history_runs": 2
+      },
+      "sos": {
+        "source": "software_simulator",
+        "status_level": "urgent",
+        "task_created": true
+      },
+      "agent": {
+        "requested_provider": "mock",
+        "actual_provider": "mock",
+        "fallback_used": false,
+        "validation_status": "valid",
+        "real_qwenpaw_called": false
+      },
+      "closeout": {
+        "task_status": "resolved",
+        "active_events": 0,
+        "status_level": "data_insufficient",
+        "family_summary_present": true,
+        "institution_summary_present": true
+      }
+    },
+    {
+      "run": 3,
+      "duration_ms": 91,
+      "csv": {
+        "previewed": 2,
+        "imported": 2,
+        "persisted_dates": 2,
+        "history_runs": 2
+      },
+      "sos": {
+        "source": "software_simulator",
+        "status_level": "urgent",
+        "task_created": true
+      },
+      "agent": {
+        "requested_provider": "mock",
+        "actual_provider": "mock",
+        "fallback_used": false,
+        "validation_status": "valid",
+        "real_qwenpaw_called": false
+      },
+      "closeout": {
+        "task_status": "resolved",
+        "active_events": 0,
+        "status_level": "data_insufficient",
+        "family_summary_present": true,
+        "institution_summary_present": true
+      }
+    }
+  ],
+  "summary": {
+    "expected_runs": 3,
+    "passed_runs": 3,
+    "all_passed": true,
+    "agent_evidence": "explicit_mock_not_fallback"
+  }
+}
