@@ -11,6 +11,7 @@ import { InstitutionPage } from "./pages/InstitutionPage";
 import { MedicationPage } from "./pages/MedicationPage";
 import { MemoryIntakePage } from "./pages/MemoryIntakePage";
 import { ElderVoiceCompanionPage } from "./pages/ElderVoiceCompanionPage";
+import { EventSimulatorPage } from "./pages/EventSimulatorPage";
 import { WearableImportPage } from "./pages/WearableImportPage";
 
 const getCurrentPath = () => {
@@ -21,6 +22,7 @@ const getCurrentPath = () => {
 export const renderRoute = (path: string) => {
   if (path === "/institution") return <InstitutionPage />;
   if (path === "/caregiver") return <CaregiverPage />;
+  if (path === "/event-simulator") return <EventSimulatorPage />;
   const wearableImportMatch = path.match(/^\/elder\/([^/]+)\/wearable-import$/);
   if (wearableImportMatch) {
     return <WearableImportPage elderId={wearableImportMatch[1]} />;

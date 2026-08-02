@@ -6,6 +6,7 @@ const navItems = [
   { href: "#/medication/E001", label: "用药计划" },
   { href: "#/family/E001", label: "家属端" },
   { href: "#/demo-control", label: "Demo 控制台" },
+  { href: "#/event-simulator", label: "软件事件模拟器" },
   { href: "#/docs", label: "文档" },
 ];
 
