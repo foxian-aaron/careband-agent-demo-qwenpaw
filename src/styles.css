@@ -1517,3 +1517,50 @@ button.primary,
 .family-voice-list li {
   line-height: 1.5;
 }
+
+/* Stage 14 — software event simulator */
+.simulator-boundary {
+  border-left: 4px solid var(--color-observation, #2f80a0);
+}
+
+.simulator-controls {
+  display: grid;
+  gap: 1rem;
+}
+
+.simulator-controls label {
+  display: grid;
+  gap: 0.4rem;
+  max-width: 320px;
+}
+
+.simulator-scenarios {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.simulator-scenarios button {
+  display: grid;
+  gap: 0.25rem;
+  text-align: left;
+}
+
+.simulator-trace-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.simulator-trace-grid pre {
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 840px) {
+  .simulator-scenarios,
+  .simulator-trace-grid {
+    grid-template-columns: 1fr;
+  }
+}
